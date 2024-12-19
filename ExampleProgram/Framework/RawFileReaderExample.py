@@ -1,6 +1,10 @@
 from __future__ import print_function
-
+from pythonnet import load
+load("coreclr")
 import clr
+import sys
+
+sys.path.append("../../Libs/NetCore/Net8/Assemblies//")
 
 clr.AddReference('ThermoFisher.CommonCore.Data')
 clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
