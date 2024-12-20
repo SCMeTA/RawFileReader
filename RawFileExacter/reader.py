@@ -78,12 +78,13 @@ class RawFileReader:
             "mass_resolution": mass_resolution
         }
 
-    def get_spectrum(self, scan_number: int, include_ms2: bool = False):
+    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> pd.DataFrame:
         scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
         scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
         ms_order = scanFilter.MSOrder
+        ms_order = 1 if ms_order == MSOrderType.Ms else 2
         if not include_ms2:
-            if ms_order == MSOrderType.Ms2:
+            if ms_order == 2:
                 return None
         if scan_statistics.IsCentroidScan:
             centroid_scan = self.rawFile.GetCentroidStream(scan_number, False)
@@ -101,6 +102,8 @@ class RawFileReader:
             )
         scan["Scan"] = scan_number
         scan["RetentionTime"] = self.rawFile.RetentionTimeFromScanNumber(scan_number)
+        scan["MS Order"] = ms_order
+        scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return scan
 
     def get_full_ms1_spectrum(self) -> pd.DataFrame:
