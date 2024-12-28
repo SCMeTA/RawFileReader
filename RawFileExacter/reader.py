@@ -1,12 +1,20 @@
-from pythonnet import load
-import logging
-load("coreclr")
-
+from sys import platform
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import clr
 import sys
 import numpy as np
 import pandas as pd
 import tqdm
+
+from pythonnet import load
+import logging
+
+if platform != "darwin":
+    load("coreclr")
+    sys.path.append("./lib/")
+elif platform == "darwin":
+    load("mono")
+    sys.path.append("./lib/")
 
 sys.path.append("./lib/")
 
@@ -78,7 +86,7 @@ class RawFileReader:
             "mass_resolution": mass_resolution
         }
 
-    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> pd.DataFrame:
+    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> pd.DataFrame | None:
         scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
         scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
         ms_order = scanFilter.MSOrder
@@ -106,28 +114,28 @@ class RawFileReader:
         scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return scan
 
-    def get_full_ms1_spectrum(self) -> pd.DataFrame:
-        scan_list = [self.get_spectrum(scan, False) for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1]))]
-        # for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
-        #     scan_list.append(self.get_spectrum(scan, False))
-        #     whole_spectrum = pd.concat(scan_list)
-        whole_spectrum = pd.concat(scan_list)
-        print(whole_spectrum.info())
-        print(whole_spectrum.head())
-        print(whole_spectrum.tail())
-        tic = whole_spectrum.groupby('Scan').sum()
-        print(tic.info())
+    def get_full_spectrum(self, ms2_include: bool = False) -> pd.DataFrame:
+        scan_range = range(self.scan_range[0], self.scan_range[1])
+        scan_list = []
+
+        with ThreadPoolExecutor() as executor:
+            future_to_scan = {executor.submit(self.get_spectrum, scan, ms2_include): scan for scan in scan_range}
+
+            for future in tqdm.tqdm(as_completed(future_to_scan), total=len(scan_range)):
+                result = future.result()
+                if result is not None:
+                    scan_list.append(result)
+
+        whole_spectrum = pd.concat(scan_list, ignore_index=True)
         return whole_spectrum
 
 
-
-
-
-if __name__ == "__main__":
-    print("Hello")
-    raw_file = RawFileReader("../20241213_folate_standard_re_neg_f_01.raw")
-    for key, item in raw_file.instrument_info.items():
-        print(f"{key}: {item}")
-
-    print(raw_file.scan_range)
-    raw_file.get_full_ms1_spectrum()
+#
+# if __name__ == "__main__":
+#     print("Hello")
+#     raw_file = RawFileReader("../20241213_folate_standard_re_neg_f_01.raw")
+#     for key, item in raw_file.instrument_info.items():
+#         print(f"{key}: {item}")
+#
+#     print(raw_file.scan_range)
+#     raw_file.get_full_ms1_spectrum()
