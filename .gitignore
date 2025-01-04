@@ -1,1 +1,10 @@
 Data
+.idea/
+
+.DS_Store/
+node_modules/
+venv/
+
+RFR/
+
+test.py
