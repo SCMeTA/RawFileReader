@@ -9,6 +9,8 @@ import numpy as np
 import polars as pl
 import tqdm
 
+from psims.mzml import MzMLWriter
+
 # get absolute path of the current file
 import os
 current_file_path = os.path.abspath(__file__)
@@ -120,6 +122,70 @@ class RawFileReader:
             )
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return scan
+
+
+    def intensity_filter(self, threshold: int, mz_array: np.array, intensity: np.array):
+        # filter the intensity and also remove the mz values
+        indices_to_keep = np.where(intensity > threshold)
+        return mz_array[indices_to_keep], intensity[indices_to_keep]
+
+
+    def write_mzml(self, output_path: str, include_ms2: bool = False, polarity: str = "negative scan", filter_threshold: int | None = None):
+        with MzMLWriter(output_path) as writer:
+            writer.controlled_vocabularies()
+            writer.file_description([
+                "MS1 spectrum",
+                "MSn spectrum",
+                "centroid spectrum"
+            ])
+            writer.software_list([
+                {"id": "psims-writer", "version": "0.1.2", "params": ["python-psims"]}
+            ])
+            source = writer.Source(1, ["electrospray ionization", "electrospray inlet"])
+            analyzer = writer.Analyzer(2, ["fourier transform ion cyclotron resonance mass spectrometer"])
+            detector = writer.Detector(3, ["inductive detector"])
+            config = writer.InstrumentConfiguration(id="IC1", component_list=[source, analyzer, detector], params=["Orbitrap-Astral"])
+            writer.instrument_configuration_list([config])
+            methods = [
+                writer.ProcessingMethod(order=1, software_reference="psims-writer", params=[
+                    "Conversion to mzML"
+                ])
+            ]
+            processing = writer.DataProcessing(methods, id='DP1')
+            writer.data_processing_list([processing])
+            with writer.run(id="run1", instrument_configuration='IC1'):
+                scan_count = self.scan_range[1] - self.scan_range[0] + 1
+                with writer.spectrum_list(count=scan_count):
+                    for scan_number in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
+                        scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
+                        scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
+                        ms_order = scanFilter.MSOrder
+                        ms_order = 1 if ms_order == MSOrderType.Ms else 2
+                        if not include_ms2:
+                            if ms_order == 2:
+                                continue
+                        if scan_statistics.IsCentroidScan:
+                            scan = self.rawFile.GetCentroidStream(scan_number, False)
+                        else:
+                            scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
+                        scan_id = f"scan={scan_number}"
+                        retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number) * 60
+                        mz_array = DotNetArrayToNPArray(scan.Positions, float)
+                        intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
+                        if filter_threshold:
+                            mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
+                        writer.write_spectrum(
+                            mz_array,
+                            intensity_array,
+                            id=scan_id,
+                            scan_start_time=retention_time,
+                            params=[
+                                f"MS{ms_order} spectrum",
+                                {"ms level": ms_order},
+                                {"total ion current": np.sum(intensity_array)},
+                            ]
+                        )
+
 
     def get_full_spectrum(self, ms2_include: bool = False) -> pl.DataFrame:
         scan_list = [
