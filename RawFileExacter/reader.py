@@ -1,22 +1,21 @@
-from sys import platform
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pythonnet import load
+import logging
+load("coreclr")
+
 import clr
 import sys
 import numpy as np
-import pandas as pd
+# import pandas as pd
+import polars as pl
 import tqdm
 
-from pythonnet import load
-import logging
-
-if platform != "darwin":
-    load("coreclr")
-    sys.path.append("./lib/")
-elif platform == "darwin":
-    load("mono")
-    sys.path.append("./lib/")
-
-sys.path.append("./lib/")
+# get absolute path of the current file
+import os
+current_file_path = os.path.abspath(__file__)
+print(current_file_path)
+lib_path = f"{'/'.join(current_file_path.split('/')[:-1])}/lib"
+print(lib_path)
+sys.path.append(lib_path)
 
 clr.AddReference('ThermoFisher.CommonCore.Data')
 clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
@@ -67,6 +66,11 @@ class RawFileReader:
     def __get_scan_number(self):
         first_scan = self.rawFile.RunHeaderEx.FirstSpectrum
         last_scan = self.rawFile.RunHeaderEx.LastSpectrum
+        print(f"First scan: {first_scan}, Last scan: {last_scan}")
+        # Get retention time of the first and last scan
+        first_rt = self.rawFile.RetentionTimeFromScanNumber(first_scan)
+        last_rt = self.rawFile.RetentionTimeFromScanNumber(last_scan)
+        print(f"First RT: {first_rt}, Last RT: {last_rt}")
         return [first_scan, last_scan]
 
     def __get_instrument_info(self):
@@ -86,7 +90,7 @@ class RawFileReader:
             "mass_resolution": mass_resolution
         }
 
-    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> pd.DataFrame | None:
+    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> pl.DataFrame:
         scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
         scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
         ms_order = scanFilter.MSOrder
@@ -96,46 +100,45 @@ class RawFileReader:
                 return None
         if scan_statistics.IsCentroidScan:
             centroid_scan = self.rawFile.GetCentroidStream(scan_number, False)
-            scan = pd.DataFrame(np.array([
-                DotNetArrayToNPArray(centroid_scan.Masses, float),
-                DotNetArrayToNPArray(centroid_scan.Intensities, float)]).transpose(),
-                columns=['Mass', 'Intensity']
+            scan = pl.DataFrame(
+                {
+                    "Scan": scan_number,
+                    "MS Order": ms_order,
+                    'Mass': DotNetArrayToNPArray(centroid_scan.Positions, float),
+                    'Intensity': DotNetArrayToNPArray(centroid_scan.Intensities, float)
+                }
             )
         else:
             segmented_scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
-            scan = pd.DataFrame(np.array([
-                DotNetArrayToNPArray(segmented_scan.Positions, float),
-                DotNetArrayToNPArray(segmented_scan.Intensities, float)]).transpose(),
-                columns=['Mass', 'Intensity']
+            scan = pl.DataFrame(
+                {
+                    "Scan": scan_number,
+                    "MS Order": ms_order,
+                    'Mass': DotNetArrayToNPArray(segmented_scan.Positions, float),
+                    'Intensity': DotNetArrayToNPArray(segmented_scan.Intensities, float)
+                }
             )
-        scan["Scan"] = scan_number
-        scan["RetentionTime"] = self.rawFile.RetentionTimeFromScanNumber(scan_number)
-        scan["MS Order"] = ms_order
-        scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
+        # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return scan
 
-    def get_full_spectrum(self, ms2_include: bool = False) -> pd.DataFrame:
-        scan_range = range(self.scan_range[0], self.scan_range[1])
-        scan_list = []
-
-        with ThreadPoolExecutor() as executor:
-            future_to_scan = {executor.submit(self.get_spectrum, scan, ms2_include): scan for scan in scan_range}
-
-            for future in tqdm.tqdm(as_completed(future_to_scan), total=len(scan_range)):
-                result = future.result()
-                if result is not None:
-                    scan_list.append(result)
-
-        whole_spectrum = pd.concat(scan_list, ignore_index=True)
+    def get_full_spectrum(self, ms2_include: bool = False) -> pl.DataFrame:
+        scan_list = [
+            spectrum for spectrum in (self.get_spectrum(scan, False) for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])))
+            if spectrum is not None
+        ]
+        # for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
+        #     scan_list.append(self.get_spectrum(scan, False))
+        #     whole_spectrum = pd.concat(scan_list)
+        whole_spectrum = pl.concat(scan_list)
         return whole_spectrum
 
 
-#
-# if __name__ == "__main__":
-#     print("Hello")
-#     raw_file = RawFileReader("../20241213_folate_standard_re_neg_f_01.raw")
-#     for key, item in raw_file.instrument_info.items():
-#         print(f"{key}: {item}")
-#
-#     print(raw_file.scan_range)
-#     raw_file.get_full_ms1_spectrum()
+
+if __name__ == "__main__":
+    print("Hello")
+    raw_file = RawFileReader("../Data/20241213_folate_standard_re_neg_f_01.raw")
+    for key, item in raw_file.instrument_info.items():
+        print(f"{key}: {item}")
+
+    print(raw_file.scan_range)
+    raw_file.get_full_spectrum()
