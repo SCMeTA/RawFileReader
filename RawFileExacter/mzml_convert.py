@@ -1,9 +1,9 @@
-import pandas as pd
+import polars as pl
 
 from psims.mzml.writer import MzMLWriter
 
 
-def write_mzml(df: pd.DataFrame, output_file: str):
+def write_mzml(df: pl.DataFrame, output_file: str):
     with MzMLWriter(open(output_file, 'wb'), close=True) as out:
         # Add default controlled vocabularies
         out.controlled_vocabularies()
@@ -11,30 +11,30 @@ def write_mzml(df: pd.DataFrame, output_file: str):
         with out.run(id="my_analysis"):
             spectrum_count = len(df)
             with out.spectrum_list(count=spectrum_count):
-                for index, row in df.iterrows():
+                for row in df.rows():
                     # Write Precursor scan
                     out.write_spectrum(
-                        row["Mass"], row["Intensity"],
-                        id=row["Scan"], params=[
+                        row[1], row[2],
+                        id=row[0], params=[
                             "MS1 Spectrum",
-                            {"ms level": row["MS Order"]},
-                            {"total ion current": sum(row["Intensity"])}
-                         ])
+                            {"ms level": row[3]},
+                            {"total ion current": sum(row[2])}
+                        ])
                     # Write MSn scans
-                    if row["MS Order"] == 2:
+                    if row[3] == 2:
                         out.write_spectrum(
-                            row["Mass"], row["Intensity"],
-                            id=row["Scan"], params=[
+                            row[1], row[2],
+                            id=row[0], params=[
                                 "MSn Spectrum",
                                 {"ms level": 2},
-                                {"total ion current": sum(row["Intensity"])}
-                             ],
-                             # Include precursor information
-                             precursor_information={
-                                "mz": row["Mass"],
-                                "intensity": row["Intensity"],
+                                {"total ion current": sum(row[2])}
+                            ],
+                            # Include precursor information
+                            precursor_information={
+                                "mz": row[1],
+                                "intensity": row[2],
                                 "charge": 1,
-                                "scan_id": row["Scan"],
+                                "scan_id": row[0],
                                 "activation": ["beam-type collisional dissociation", {"collision energy": 25}],
-                                "isolation_window": [row["Mass"] - 1, row["Mass"], row["Mass"] + 1]
-                             })
+                                "isolation_window": [row[1] - 1, row[1], row[1] + 1]
+                            })

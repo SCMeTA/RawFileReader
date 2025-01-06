@@ -123,7 +123,13 @@ class RawFileReader:
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return scan
 
-    def write_mzml(self, output_path: str, include_ms2: bool = False):
+    def intensity_filter(self, threshold: int, mz_array: np.array, intensity: np.array):
+        # filter the intensity and also remove the mz values
+        indices_to_keep = np.where(intensity > threshold)
+        return mz_array[indices_to_keep], intensity[indices_to_keep]
+
+
+    def write_mzml(self, output_path: str, include_ms2: bool = False, polarity: str = "negative scan", filter_threshold: int | None = None):
         with MzMLWriter(output_path) as writer:
             writer.controlled_vocabularies()
             writer.file_description([
@@ -156,7 +162,7 @@ class RawFileReader:
                         ms_order = 1 if ms_order == MSOrderType.Ms else 2
                         if not include_ms2:
                             if ms_order == 2:
-                                return None
+                                continue
                         if scan_statistics.IsCentroidScan:
                             scan = self.rawFile.GetCentroidStream(scan_number, False)
                         else:
@@ -165,15 +171,17 @@ class RawFileReader:
                         retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number) * 60
                         mz_array = DotNetArrayToNPArray(scan.Positions, float)
                         intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
+                        if filter_threshold:
+                            mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
                         writer.write_spectrum(
                             mz_array,
                             intensity_array,
                             id=scan_id,
+                            scan_start_time=retention_time,
                             params=[
                                 f"MS{ms_order} spectrum",
                                 {"ms level": ms_order},
                                 {"total ion current": np.sum(intensity_array)},
-                                {"scan start time": retention_time}
                             ]
                         )
 
