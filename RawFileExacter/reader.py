@@ -123,6 +123,7 @@ class RawFileReader:
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return scan
 
+
     def intensity_filter(self, threshold: int, mz_array: np.array, intensity: np.array):
         # filter the intensity and also remove the mz values
         indices_to_keep = np.where(intensity > threshold)
