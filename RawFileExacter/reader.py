@@ -8,16 +8,18 @@ import numpy as np
 # import pandas as pd
 import polars as pl
 import tqdm
+from pathlib import Path
 
 from psims.mzml import MzMLWriter
 
 # get absolute path of the current file
 import os
-current_file_path = os.path.abspath(__file__)
-print(current_file_path)
-lib_path = f"{'/'.join(current_file_path.split('/')[:-1])}/lib"
-print(lib_path)
-sys.path.append(lib_path)
+
+current_file_path = Path(os.path.abspath(__file__))
+# lib_path is a folder worked both with windows and linux
+lib_path = current_file_path.parent / "lib"
+
+sys.path.append(str(lib_path))
 
 clr.AddReference('ThermoFisher.CommonCore.Data')
 clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
