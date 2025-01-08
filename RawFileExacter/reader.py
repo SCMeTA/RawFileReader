@@ -46,7 +46,6 @@ def DotNetArrayToNPArray(arr, dtype):
     return np.array(list(arr), dtype=dtype)
 
 
-
 class RawFileReader:
     def __init__(self, file_path: str):
         self.file_path: str = file_path
@@ -132,7 +131,7 @@ class RawFileReader:
         return mz_array[indices_to_keep], intensity[indices_to_keep]
 
 
-    def write_mzml(self, output_path: str, include_ms2: bool = False, polarity: str = "negative scan", filter_threshold: int | None = None):
+    def write_mzml(self, output_path: str, include_ms2: bool = False, filter_threshold: int | None = None):
         with MzMLWriter(output_path) as writer:
             writer.controlled_vocabularies()
             writer.file_description([
@@ -161,6 +160,7 @@ class RawFileReader:
                     for scan_number in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
                         scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
                         scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
+                        ionization_mode = scanFilter.IonizationMode
                         ms_order = scanFilter.MSOrder
                         ms_order = 1 if ms_order == MSOrderType.Ms else 2
                         if not include_ms2:
@@ -181,6 +181,7 @@ class RawFileReader:
                             intensity_array,
                             id=scan_id,
                             scan_start_time=retention_time,
+                            polarity=ionization_mode,
                             params=[
                                 f"MS{ms_order} spectrum",
                                 {"ms level": ms_order},
