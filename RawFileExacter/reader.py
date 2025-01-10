@@ -176,6 +176,8 @@ class RawFileReader:
                         intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
                         if filter_threshold:
                             mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
+                            mz_array = np.round(mz_array, 6)
+                            intensity_array = np.round(intensity_array, 2)
                         writer.write_spectrum(
                             mz_array,
                             intensity_array,
