@@ -27,10 +27,20 @@ def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: b
     output_files = [Path(output_folder) / f'{raw_file.stem}.mzML' for raw_file in raw_files]
     # RawFileReader(file_path).write_mzml(output_path, include_ms2, filter_threshold)
     threads = []
+    max_threads = 4
+    semaphore = threading.Semaphore(max_threads)
+
+    def worker(input_path, output_path, include_ms2, filter_threshold):
+        with semaphore:  # Acquire the semaphore
+            convert_raw_to_mzml(input_path, output_path, include_ms2, filter_threshold)
+        # Semaphore is automatically released at the end of this block
+    threads = []
     for input_path, output_path in zip(raw_files, output_files):
-        thread = threading.Thread(target=convert_raw_to_mzml, args=(str(input_path), str(output_path), include_ms2, filter_threshold))
+        thread = threading.Thread(target=worker,
+                                  args=(str(input_path), str(output_path), include_ms2, filter_threshold))
         thread.start()
         threads.append(thread)
+
     for thread in threads:
         thread.join()
     logging.info("Conversion complete")
