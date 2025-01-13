@@ -171,7 +171,7 @@ class RawFileReader:
                         else:
                             scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
                         scan_id = f"scan={scan_number}"
-                        retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number) * 60
+                        retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number)
                         mz_array = DotNetArrayToNPArray(scan.Positions, float)
                         intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
                         if filter_threshold:
