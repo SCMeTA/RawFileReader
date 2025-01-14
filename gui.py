@@ -2,7 +2,7 @@ import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, \
     QMessageBox, QCheckBox, QSpinBox
 
-from RawFileExacter.cli import convert_folder_to_mzml as convert_files
+from RawFileExacter.cli import convert_folder_to_mzml
 
 class ConverterApp(QWidget):
     def __init__(self):
@@ -68,8 +68,8 @@ class ConverterApp(QWidget):
             QMessageBox.critical(self, "Error", "Please provide input and output folder paths.")
             return
 
-        result = convert_files(input_folder, output_folder, include_ms2, filter_threshold)
-        QMessageBox.information(self, "Conversion Completed", result)
+        convert_folder_to_mzml(input_folder, output_folder, include_ms2, filter_threshold)
+        QMessageBox.information(self, "Conversion Completed", "Conversion Completed.")
 
 
 if __name__ == '__main__':

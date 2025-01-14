@@ -15,11 +15,6 @@ def convert_raw_to_mzml(input_path: str, output_path: str, include_ms2: bool = F
     raw_file_reader.write_mzml(output_path, include_ms2, filter_threshold)
 
 
-@click.command(name='convert folder')
-@click.argument('input_folder', type=click.Path(exists=True))
-@click.argument('output_folder', type=click.Path())
-@click.option('--include-ms2', is_flag=True, help='Include MS2 spectra in the mzML file')
-@click.option('--filter-threshold', type=int, help='Filter out peaks with intensity below this threshold')
 def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: bool = False, filter_threshold: int | None = None):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -44,3 +39,12 @@ def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: b
     for thread in threads:
         thread.join()
     logging.info("Conversion complete")
+
+
+@click.command(name='convert folder')
+@click.argument('input_folder', type=click.Path(exists=True))
+@click.argument('output_folder', type=click.Path())
+@click.option('--include-ms2', is_flag=True, help='Include MS2 spectra in the mzML file')
+@click.option('--filter-threshold', type=int, help='Filter out peaks with intensity below this threshold')
+def cli(input_folder, output_folder, include_ms2, filter_threshold):
+    convert_folder_to_mzml(input_folder, output_folder, include_ms2, filter_threshold)

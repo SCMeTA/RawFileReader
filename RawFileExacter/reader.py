@@ -40,7 +40,7 @@ from ThermoFisher.CommonCore.RawFileReader import RawFileReaderAdapter
 logger = logging.getLogger(__name__)
 
 logger.info("Successfully loaded ThermoFisher.CommonCore.RawFileReader")
-print("Successfully loaded ThermoFisher.CommonCore.RawFileReader")
+
 
 def DotNetArrayToNPArray(arr, dtype):
     return np.array(list(arr), dtype=dtype)
@@ -183,7 +183,6 @@ class RawFileReader:
                             intensity_array,
                             id=scan_id,
                             scan_start_time=retention_time,
-                            polarity=ionization_mode,
                             params=[
                                 f"MS{ms_order} spectrum",
                                 {"ms level": ms_order},
