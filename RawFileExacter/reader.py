@@ -93,51 +93,70 @@ class RawFileReader:
             "mass_resolution": mass_resolution
         }
 
-    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> pl.DataFrame:
+    def get_spectrum(self, scan_number: int, include_ms2: bool = False) -> tuple | None:
         scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
         scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
         ms_order = scanFilter.MSOrder
         ms_order = 1 if ms_order == MSOrderType.Ms else 2
+        polarity = "positive scan" if str(scanFilter.Polarity) == "Positive" else "negative scan"
+        retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number)
         if not include_ms2:
             if ms_order == 2:
                 return None
         if scan_statistics.IsCentroidScan:
             centroid_scan = self.rawFile.GetCentroidStream(scan_number, False)
-            scan = pl.DataFrame(
-                {
-                    "Scan": scan_number,
-                    "MS Order": ms_order,
-                    'Mass': DotNetArrayToNPArray(centroid_scan.Positions, float),
-                    'Intensity': DotNetArrayToNPArray(centroid_scan.Intensities, float)
-                }
-            )
+            # scan = pl.DataFrame(
+            #     {
+            #         "Scan": scan_number,
+            #         "MS Order": ms_order,
+            #         'Mass': DotNetArrayToNPArray(centroid_scan.Positions, float),
+            #         'Intensity': DotNetArrayToNPArray(centroid_scan.Intensities, float)
+            #     }
+            # )
+            masses = DotNetArrayToNPArray(centroid_scan.Masses, float)
+            intensities = DotNetArrayToNPArray(centroid_scan.Intensities, int)
+            is_centroid = True
         else:
             segmented_scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
-            scan = pl.DataFrame(
-                {
-                    "Scan": scan_number,
-                    "MS Order": ms_order,
-                    'Mass': DotNetArrayToNPArray(segmented_scan.Positions, float),
-                    'Intensity': DotNetArrayToNPArray(segmented_scan.Intensities, float)
-                }
-            )
+            # scan = pl.DataFrame(
+            #     {
+            #         "Scan": scan_number,
+            #         "MS Order": ms_order,
+            #         'Mass': DotNetArrayToNPArray(segmented_scan.Positions, float),
+            #         'Intensity': DotNetArrayToNPArray(segmented_scan.Intensities, float)
+            #     }
+            # )
+            masses = DotNetArrayToNPArray(segmented_scan.Masses, float)
+            intensities = DotNetArrayToNPArray(segmented_scan.Intensities, int)
+            is_centroid = False
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
-        return scan
-
+        return retention_time, ms_order, masses, intensities, polarity, is_centroid
 
     def intensity_filter(self, threshold: int, mz_array: np.array, intensity: np.array):
         # filter the intensity and also remove the mz values
         indices_to_keep = np.where(intensity > threshold)
         return mz_array[indices_to_keep], intensity[indices_to_keep]
 
+    def to_series(self, scan_number: int, include_ms2: bool = False) -> pl.Series | None:
+        retention_time, ms_order, masses, intensities, polarity, is_centroid = self.get_spectrum(scan_number, include_ms2)
+        if masses is None:
+            return None
+        return pl.Series(
+            {
+                "Scan": scan_number,
+                "MS Order": ms_order,
+                "Mass": masses,
+                "Intensity": intensities,
+                "Polarity": polarity
+            }
+        )
 
-    def write_mzml(self, output_path: str, include_ms2: bool = False, filter_threshold: int | None = None):
+    def to_mzml(self, output_path: str, include_ms2: bool = False, filter_threshold: int | None = None):
         with MzMLWriter(output_path) as writer:
             writer.controlled_vocabularies()
             writer.file_description([
                 "MS1 spectrum",
                 "MSn spectrum",
-                "centroid spectrum"
             ])
             writer.software_list([
                 {"id": "psims-writer", "version": "0.1.2", "params": ["python-psims"]}
@@ -158,31 +177,34 @@ class RawFileReader:
                 scan_count = self.scan_range[1] - self.scan_range[0] + 1
                 with writer.spectrum_list(count=scan_count):
                     for scan_number in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
-                        scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
-                        scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
-                        ionization_mode = scanFilter.IonizationMode
-                        ms_order = scanFilter.MSOrder
-                        ms_order = 1 if ms_order == MSOrderType.Ms else 2
-                        if not include_ms2:
-                            if ms_order == 2:
-                                continue
-                        if scan_statistics.IsCentroidScan:
-                            scan = self.rawFile.GetCentroidStream(scan_number, False)
-                        else:
-                            scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
+                        # scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
+                        # scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
+                        # ionization_mode = scanFilter.IonizationMode
+                        # ms_order = scanFilter.MSOrder
+                        # ms_order = 1 if ms_order == MSOrderType.Ms else 2
+                        # if not include_ms2:
+                        #     if ms_order == 2:
+                        #         continue
+                        # if scan_statistics.IsCentroidScan:
+                        #     scan = self.rawFile.GetCentroidStream(scan_number, False)
+                        # else:
+                        #     scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
+                        # scan_id = f"scan={scan_number}"
+                        # retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number)
+                        # mz_array = DotNetArrayToNPArray(scan.Positions, float)
+                        # intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
+                        retention_time, ms_order, mz_array, intensity_array, polarity, is_centroid = self.get_spectrum(scan_number, include_ms2)
                         scan_id = f"scan={scan_number}"
-                        retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number)
-                        mz_array = DotNetArrayToNPArray(scan.Positions, float)
-                        intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
                         if filter_threshold:
                             mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
-                            mz_array = np.round(mz_array, 6)
-                            intensity_array = np.round(intensity_array, 2)
+                            mz_array = np.round(mz_array, 5)
                         writer.write_spectrum(
                             mz_array,
                             intensity_array,
                             id=scan_id,
                             scan_start_time=retention_time,
+                            polarity=polarity,
+                            centroided=is_centroid,
                             params=[
                                 f"MS{ms_order} spectrum",
                                 {"ms level": ms_order},
@@ -191,14 +213,11 @@ class RawFileReader:
                         )
 
 
-    def get_full_spectrum(self, ms2_include: bool = False) -> pl.DataFrame:
+    def to_dataframe(self, include_ms2: bool = False) -> pl.DataFrame:
         scan_list = [
-            spectrum for spectrum in (self.get_spectrum(scan, False) for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])))
+            spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])))
             if spectrum is not None
         ]
-        # for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
-        #     scan_list.append(self.get_spectrum(scan, False))
-        #     whole_spectrum = pd.concat(scan_list)
         whole_spectrum = pl.concat(scan_list)
         return whole_spectrum
 
@@ -211,4 +230,4 @@ if __name__ == "__main__":
         print(f"{key}: {item}")
 
     print(raw_file.scan_range)
-    raw_file.get_full_spectrum()
+    raw_file.to_dataframe()

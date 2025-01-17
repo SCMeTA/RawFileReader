@@ -12,7 +12,7 @@ from .reader import RawFileReader
 
 def convert_raw_to_mzml(input_path: str, output_path: str, include_ms2: bool = False, filter_threshold: int | None = None):
     raw_file_reader = RawFileReader(input_path)
-    raw_file_reader.write_mzml(output_path, include_ms2, filter_threshold)
+    raw_file_reader.to_mzml(output_path, include_ms2, filter_threshold)
 
 
 def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: bool = False, filter_threshold: int | None = None):
