@@ -43,6 +43,8 @@ logger.info("Successfully loaded ThermoFisher.CommonCore.RawFileReader")
 
 
 def DotNetArrayToNPArray(arr, dtype):
+    if arr is None:
+        return np.array([], dtype=dtype)
     return np.array(list(arr), dtype=dtype)
 
 
