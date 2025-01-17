@@ -126,7 +126,7 @@ class RawFileReader:
             #         'Intensity': DotNetArrayToNPArray(segmented_scan.Intensities, float)
             #     }
             # )
-            masses = DotNetArrayToNPArray(segmented_scan.Masses, float)
+            masses = DotNetArrayToNPArray(segmented_scan.Positions, float)
             intensities = DotNetArrayToNPArray(segmented_scan.Intensities, int)
             is_centroid = False
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
