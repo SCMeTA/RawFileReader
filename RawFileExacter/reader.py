@@ -195,7 +195,10 @@ class RawFileReader:
                         # retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number)
                         # mz_array = DotNetArrayToNPArray(scan.Positions, float)
                         # intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
-                        retention_time, ms_order, mz_array, intensity_array, polarity, is_centroid = self.get_spectrum(scan_number, include_ms2)
+                        results = self.get_spectrum(scan_number, include_ms2)
+                        if results is None:
+                            continue
+                        retention_time, ms_order, mz_array, intensity_array, polarity, is_centroid = results
                         scan_id = f"scan={scan_number}"
                         if filter_threshold:
                             mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
@@ -227,9 +230,5 @@ class RawFileReader:
 
 if __name__ == "__main__":
     print("Hello")
-    raw_file = RawFileReader("../Data/20241213_folate_standard_re_neg_f_01.raw")
-    for key, item in raw_file.instrument_info.items():
-        print(f"{key}: {item}")
-
-    print(raw_file.scan_range)
-    raw_file.to_dataframe()
+    raw_file = RawFileReader(r"D:\Developer\RawFileReader\Data\20250117_fiona_metabolite_nc_D0_1.raw")
+    raw_file.to_mzml("test.mzml")
