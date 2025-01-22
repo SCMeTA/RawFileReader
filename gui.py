@@ -2,7 +2,12 @@ import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, \
     QMessageBox, QCheckBox, QSpinBox
 
-from RawFileExacter.cli import convert_folder_to_mzml
+from RawFileExacter import convert_folder_to_mzml
+
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ConverterApp(QWidget):
     def __init__(self):
@@ -38,6 +43,7 @@ class ConverterApp(QWidget):
         self.filter_threshold_spinbox = QSpinBox(self)
         self.filter_threshold_spinbox.setMinimum(0)
         self.filter_threshold_spinbox.setMaximum(10000)
+        self.filter_threshold_spinbox.setValue(101)
         layout.addWidget(self.filter_threshold_spinbox)
 
         self.convert_button = QPushButton("Start Conversion", self)
@@ -73,6 +79,7 @@ class ConverterApp(QWidget):
 
 
 if __name__ == '__main__':
+    logger.info("Starting GUI")
     app = QApplication(sys.argv)
     ex = ConverterApp()
     ex.show()

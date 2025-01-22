@@ -7,13 +7,17 @@ import sys
 import numpy as np
 # import pandas as pd
 import polars as pl
-import tqdm
+from tqdm import trange
+from tqdm.contrib.logging import logging_redirect_tqdm
+import logging
 from pathlib import Path
 
 from psims.mzml import MzMLWriter
 
 # get absolute path of the current file
 import os
+
+logger = logging.getLogger(__name__)
 
 current_file_path = Path(os.path.abspath(__file__))
 # lib_path is a folder worked both with windows and linux
@@ -48,10 +52,18 @@ def DotNetArrayToNPArray(arr, dtype):
     return np.array(list(arr), dtype=dtype)
 
 
+class RawFileNotOpenError(Exception):
+    def __init__(self, message, errors=None):
+        super().__init__(message)
+        self.errors = errors
+
+    def __str__(self):
+        return f"Cannot read RAW file: {self.errors}"
+
+
 class RawFileReader:
     def __init__(self, file_path: str):
         self.file_path: str = file_path
-        print(f"Opening {self.file_path}")
         self.rawFile = self.__open_raw_file()
         self.scan_range: list = self.__get_scan_number()
         self.instrument_info: dict = self.__get_instrument_info()
@@ -60,22 +72,23 @@ class RawFileReader:
         raw_file = RawFileReaderAdapter.FileFactory(self.file_path)
         if raw_file.IsOpen:
             logger.info(f"Successfully opened {self.file_path}")
-            print("Successfully open the file")
+            # print("Successfully open the file")
             raw_file.SelectInstrument(Device.MS, 1)
             return raw_file
         else:
             logger.error(f"Failed to open {self.file_path}")
-            print("Failed to open the file")
-            return None
+            raise RawFileNotOpenError(f"Failed to open {self.file_path}")
 
     def __get_scan_number(self):
         first_scan = self.rawFile.RunHeaderEx.FirstSpectrum
         last_scan = self.rawFile.RunHeaderEx.LastSpectrum
-        print(f"First scan: {first_scan}, Last scan: {last_scan}")
+        # logger.info(f"First scan: {first_scan}, Last scan: {last_scan}")
+        # print(f"First scan: {first_scan}, Last scan: {last_scan}")
         # Get retention time of the first and last scan
         first_rt = self.rawFile.RetentionTimeFromScanNumber(first_scan)
         last_rt = self.rawFile.RetentionTimeFromScanNumber(last_scan)
-        print(f"First RT: {first_rt}, Last RT: {last_rt}")
+        logger.info(f"First RT: {first_rt}, Last RT: {last_rt}")
+        # print(f"First RT: {first_rt}, Last RT: {last_rt}")
         return [first_scan, last_scan]
 
     def __get_instrument_info(self):
@@ -107,27 +120,11 @@ class RawFileReader:
                 return None
         if scan_statistics.IsCentroidScan:
             centroid_scan = self.rawFile.GetCentroidStream(scan_number, False)
-            # scan = pl.DataFrame(
-            #     {
-            #         "Scan": scan_number,
-            #         "MS Order": ms_order,
-            #         'Mass': DotNetArrayToNPArray(centroid_scan.Positions, float),
-            #         'Intensity': DotNetArrayToNPArray(centroid_scan.Intensities, float)
-            #     }
-            # )
             masses = DotNetArrayToNPArray(centroid_scan.Masses, float)
             intensities = DotNetArrayToNPArray(centroid_scan.Intensities, int)
             is_centroid = True
         else:
             segmented_scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
-            # scan = pl.DataFrame(
-            #     {
-            #         "Scan": scan_number,
-            #         "MS Order": ms_order,
-            #         'Mass': DotNetArrayToNPArray(segmented_scan.Positions, float),
-            #         'Intensity': DotNetArrayToNPArray(segmented_scan.Intensities, float)
-            #     }
-            # )
             masses = DotNetArrayToNPArray(segmented_scan.Positions, float)
             intensities = DotNetArrayToNPArray(segmented_scan.Intensities, int)
             is_centroid = False
@@ -177,24 +174,8 @@ class RawFileReader:
             writer.data_processing_list([processing])
             with writer.run(id="run1", instrument_configuration='IC1'):
                 scan_count = self.scan_range[1] - self.scan_range[0] + 1
-                with writer.spectrum_list(count=scan_count):
-                    for scan_number in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])):
-                        # scan_statistics = self.rawFile.GetScanStatsForScanNumber(scan_number)
-                        # scanFilter = IScanFilter(self.rawFile.GetFilterForScanNumber(scan_number))
-                        # ionization_mode = scanFilter.IonizationMode
-                        # ms_order = scanFilter.MSOrder
-                        # ms_order = 1 if ms_order == MSOrderType.Ms else 2
-                        # if not include_ms2:
-                        #     if ms_order == 2:
-                        #         continue
-                        # if scan_statistics.IsCentroidScan:
-                        #     scan = self.rawFile.GetCentroidStream(scan_number, False)
-                        # else:
-                        #     scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
-                        # scan_id = f"scan={scan_number}"
-                        # retention_time = self.rawFile.RetentionTimeFromScanNumber(scan_number)
-                        # mz_array = DotNetArrayToNPArray(scan.Positions, float)
-                        # intensity_array = DotNetArrayToNPArray(scan.Intensities, float)
+                with writer.spectrum_list(count=scan_count), logging_redirect_tqdm():
+                    for scan_number in trange(self.scan_range[0], self.scan_range[1]):
                         results = self.get_spectrum(scan_number, include_ms2)
                         if results is None:
                             continue
@@ -219,16 +200,17 @@ class RawFileReader:
 
 
     def to_dataframe(self, include_ms2: bool = False) -> pl.DataFrame:
-        scan_list = [
-            spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in tqdm.tqdm(range(self.scan_range[0], self.scan_range[1])))
-            if spectrum is not None
-        ]
+        with logging_redirect_tqdm():
+            scan_list = [
+                spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in trange(self.scan_range[0], self.scan_range[1]))
+                if spectrum is not None
+            ]
         whole_spectrum = pl.concat(scan_list)
         return whole_spectrum
 
 
 
+
 if __name__ == "__main__":
-    print("Hello")
     raw_file = RawFileReader(r"D:\Developer\RawFileReader\Data\20250117_fiona_metabolite_nc_D0_1.raw")
     raw_file.to_mzml("test.mzml")
