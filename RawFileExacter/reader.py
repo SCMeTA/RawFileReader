@@ -71,12 +71,12 @@ class RawFileReader:
     def __open_raw_file(self):
         raw_file = RawFileReaderAdapter.FileFactory(self.file_path)
         if raw_file.IsOpen:
-            logger.info(f"Successfully opened {self.file_path}")
+            # logger.info(f"Successfully opened {self.file_path}")
             # print("Successfully open the file")
             raw_file.SelectInstrument(Device.MS, 1)
             return raw_file
         else:
-            logger.error(f"Failed to open {self.file_path}")
+            # logger.error(f"Failed to open {self.file_path}")
             raise RawFileNotOpenError(f"Failed to open {self.file_path}")
 
     def __get_scan_number(self):
@@ -87,7 +87,7 @@ class RawFileReader:
         # Get retention time of the first and last scan
         first_rt = self.rawFile.RetentionTimeFromScanNumber(first_scan)
         last_rt = self.rawFile.RetentionTimeFromScanNumber(last_scan)
-        logger.info(f"First RT: {first_rt}, Last RT: {last_rt}")
+        # logger.info(f"First RT: {first_rt}, Last RT: {last_rt}")
         # print(f"First RT: {first_rt}, Last RT: {last_rt}")
         return [first_scan, last_scan]
 
