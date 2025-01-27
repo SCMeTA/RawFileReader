@@ -9,10 +9,20 @@ import logging
 
 from .reader import RawFileReader
 
+error_list = []
+
 
 def convert_raw_to_mzml(input_path: str, output_path: str, include_ms2: bool = False, filter_threshold: int | None = None):
-    raw_file_reader = RawFileReader(input_path)
-    raw_file_reader.to_mzml(output_path, include_ms2, filter_threshold)
+    global error_list
+    try:
+        raw_file_reader = RawFileReader(input_path)
+        raw_file_reader.to_mzml(output_path, include_ms2, filter_threshold)
+    except Exception as e:
+        file_name = Path(input_path).name
+        error_list.append(file_name)
+        logging.error(f"Error converting {file_name}")
+        with open('error.log', 'a') as f:
+            f.write(f"Error converting {file_name}: {e}\n")
 
 
 def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: bool = False, filter_threshold: int | None = None):
