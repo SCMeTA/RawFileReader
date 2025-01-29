@@ -46,7 +46,7 @@ class ConverterApp(QWidget):
         self.filter_threshold_spinbox = QSpinBox(self)
         self.filter_threshold_spinbox.setMinimum(0)
         self.filter_threshold_spinbox.setMaximum(10000)
-        self.filter_threshold_spinbox.setValue(101)
+        self.filter_threshold_spinbox.setValue(100)
         layout.addWidget(self.filter_threshold_spinbox)
 
         self.convert_button = QPushButton("Start Conversion", self)

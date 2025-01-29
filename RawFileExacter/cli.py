@@ -21,6 +21,8 @@ def convert_raw_to_mzml(input_path: str, output_path: str, include_ms2: bool = F
         file_name = Path(input_path).name
         error_list.append(file_name)
         logging.error(f"Error converting {file_name}")
+        # remove the mzml file
+        os.remove(output_path)
         with open('error.log', 'a') as f:
             f.write(f"Error converting {file_name}: {e}\n")
 
@@ -32,7 +34,7 @@ def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: b
     output_files = [Path(output_folder) / f'{raw_file.stem}.mzML' for raw_file in raw_files]
     # RawFileReader(file_path).write_mzml(output_path, include_ms2, filter_threshold)
     threads = []
-    max_threads = 4
+    max_threads = 8
     semaphore = threading.Semaphore(max_threads)
 
     def worker(input_path, output_path, include_ms2, filter_threshold):

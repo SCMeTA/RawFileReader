@@ -64,6 +64,7 @@ class RawFileNotOpenError(Exception):
 class RawFileReader:
     def __init__(self, file_path: str):
         self.file_path: str = file_path
+        self.file_name = Path(file_path).stem
         self.rawFile = self.__open_raw_file()
         self.scan_range: list = self.__get_scan_number()
         self.instrument_info: dict = self.__get_instrument_info()
@@ -73,11 +74,16 @@ class RawFileReader:
         if raw_file.IsOpen:
             # logger.info(f"Successfully opened {self.file_path}")
             # print("Successfully open the file")
-            raw_file.SelectInstrument(Device.MS, 1)
-            return raw_file
+            try:
+                raw_file.SelectInstrument(Device.MS, 1)
+                return raw_file
+            except Exception as e:
+                raise RawFileNotOpenError(f"Failed open RAW file: {self.file_name}")
+
         else:
             # logger.error(f"Failed to open {self.file_path}")
             raise RawFileNotOpenError(f"Failed to open {self.file_path}")
+
 
     def __get_scan_number(self):
         first_scan = self.rawFile.RunHeaderEx.FirstSpectrum
@@ -121,12 +127,12 @@ class RawFileReader:
         if scan_statistics.IsCentroidScan:
             centroid_scan = self.rawFile.GetCentroidStream(scan_number, False)
             masses = DotNetArrayToNPArray(centroid_scan.Masses, float)
-            intensities = DotNetArrayToNPArray(centroid_scan.Intensities, int)
+            intensities = DotNetArrayToNPArray(centroid_scan.Intensities, float)
             is_centroid = True
         else:
             segmented_scan = self.rawFile.GetSegmentedScanFromScanNumber(scan_number, scan_statistics)
             masses = DotNetArrayToNPArray(segmented_scan.Positions, float)
-            intensities = DotNetArrayToNPArray(segmented_scan.Intensities, int)
+            intensities = DotNetArrayToNPArray(segmented_scan.Intensities, float)
             is_centroid = False
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return retention_time, ms_order, masses, intensities, polarity, is_centroid
@@ -175,7 +181,7 @@ class RawFileReader:
             with writer.run(id="run1", instrument_configuration='IC1'):
                 scan_count = self.scan_range[1] - self.scan_range[0] + 1
                 with writer.spectrum_list(count=scan_count), logging_redirect_tqdm():
-                    for scan_number in trange(self.scan_range[0], self.scan_range[1]):
+                    for scan_number in trange(self.scan_range[0], self.scan_range[1], desc=f"Converting {self.file_name}"):
                         results = self.get_spectrum(scan_number, include_ms2)
                         if results is None:
                             continue
@@ -184,6 +190,7 @@ class RawFileReader:
                         if filter_threshold:
                             mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
                             mz_array = np.round(mz_array, 5)
+                            intensity_array = np.round(intensity_array, 2)
                         writer.write_spectrum(
                             mz_array,
                             intensity_array,
