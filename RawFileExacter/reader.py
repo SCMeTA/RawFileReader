@@ -151,12 +151,14 @@ class RawFileReader:
             return None
         else:
             retention_time, ms_order, masses, intensities, polarity, is_centroid = __spec_data
-        return pd.Series(
+            polarity = -1 if polarity == "negative scan" else 1
+        return pd.DataFrame(
             {
                 "Scan": scan_number,
+                "RetentionTime": round(retention_time, 3),
                 "MS Order": ms_order,
-                "Mass": masses,
-                "Intensity": intensities,
+                "Mass": masses.round(decimals=6),
+                "Intensity": intensities.round(2),
                 "Polarity": polarity
             }
         )
