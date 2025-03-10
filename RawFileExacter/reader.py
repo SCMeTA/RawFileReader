@@ -1,12 +1,15 @@
 from pythonnet import load
 import logging
+
+from platform import system as platform_system
+
+
 load("coreclr")
 
 import clr
 import sys
 import numpy as np
-# import pandas as pd
-import polars as pl
+import pandas as pd
 from tqdm import trange
 from tqdm.contrib.logging import logging_redirect_tqdm
 import logging
@@ -142,11 +145,13 @@ class RawFileReader:
         indices_to_keep = np.where(intensity > threshold)
         return mz_array[indices_to_keep], intensity[indices_to_keep]
 
-    def to_series(self, scan_number: int, include_ms2: bool = False) -> pl.Series | None:
-        retention_time, ms_order, masses, intensities, polarity, is_centroid = self.get_spectrum(scan_number, include_ms2)
-        if masses is None:
+    def to_series(self, scan_number: int, include_ms2: bool = False) -> pd.Series | None:
+        __spec_data = self.get_spectrum(scan_number, include_ms2)
+        if __spec_data is None:
             return None
-        return pl.Series(
+        else:
+            retention_time, ms_order, masses, intensities, polarity, is_centroid = __spec_data
+        return pd.Series(
             {
                 "Scan": scan_number,
                 "MS Order": ms_order,
@@ -206,18 +211,18 @@ class RawFileReader:
                         )
 
 
-    def to_dataframe(self, include_ms2: bool = False) -> pl.DataFrame:
+    def to_dataframe(self, include_ms2: bool = False) -> pd.DataFrame:
         with logging_redirect_tqdm():
             scan_list = [
                 spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in trange(self.scan_range[0], self.scan_range[1]))
                 if spectrum is not None
             ]
-        whole_spectrum = pl.concat(scan_list)
+        whole_spectrum = pd.concat(scan_list)
         return whole_spectrum
 
 
 
 
 if __name__ == "__main__":
-    raw_file = RawFileReader(r"D:\Developer\RawFileReader\Data\20250117_fiona_metabolite_nc_D0_1.raw")
+    raw_file = RawFileReader(r"../Data/blank-test.raw")
     raw_file.to_mzml("test.mzml")
