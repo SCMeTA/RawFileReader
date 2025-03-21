@@ -27,11 +27,12 @@ def convert_raw_to_mzml(input_path: str, output_path: str, include_ms2: bool = F
             f.write(f"Error converting {file_name}: {e}\n")
 
 
-def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: bool = False, filter_threshold: int | None = None):
+def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: bool = False, filter_threshold: int | None = None, include_blank: bool = False):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     raw_files = list(Path(input_folder).rglob('*.raw'))
-    raw_files = [file for file in raw_files if not "blank" in file.stem.lower()]
+    if not include_blank:
+        raw_files = [file for file in raw_files if not "blank" in file.stem.lower()]
     output_files = [Path(output_folder) / f'{raw_file.stem}.mzML' for raw_file in raw_files]
     # RawFileReader(file_path).write_mzml(output_path, include_ms2, filter_threshold)
     threads = []

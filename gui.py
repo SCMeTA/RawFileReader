@@ -1,6 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, \
-    QMessageBox, QCheckBox, QSpinBox
+    QMessageBox, QCheckBox, QSpinBox, QHBoxLayout
 
 from RawFileExacter import convert_folder_to_mzml
 
@@ -38,8 +38,14 @@ class ConverterApp(QWidget):
         self.output_folder_button.clicked.connect(self.select_output_folder)
         layout.addWidget(self.output_folder_button)
 
+        checkbox_layout = QHBoxLayout()
+        # Put the checkboxes in one row
         self.include_ms2_checkbox = QCheckBox("Include MS2", self)
-        layout.addWidget(self.include_ms2_checkbox)
+        self.include_blank_checkbox = QCheckBox("Include Blank", self)
+        checkbox_layout.addWidget(self.include_ms2_checkbox)
+        checkbox_layout.addWidget(self.include_blank_checkbox)
+
+        layout.addLayout(checkbox_layout)
 
         self.filter_threshold_label = QLabel("Filter Threshold:")
         layout.addWidget(self.filter_threshold_label)
@@ -71,13 +77,14 @@ class ConverterApp(QWidget):
         input_folder = self.input_folder_edit.text()
         output_folder = self.output_folder_edit.text()
         include_ms2 = self.include_ms2_checkbox.isChecked()
+        include_blank = self.include_blank_checkbox.isChecked()
         filter_threshold = self.filter_threshold_spinbox.value()
 
         if not input_folder or not output_folder:
             QMessageBox.critical(self, "Error", "Please provide input and output folder paths.")
             return
 
-        convert_folder_to_mzml(input_folder, output_folder, include_ms2, filter_threshold)
+        convert_folder_to_mzml(input_folder, output_folder, include_ms2, filter_threshold, include_blank)
         QMessageBox.information(self, "Conversion Completed", "Conversion Completed.")
 
 
