@@ -38,7 +38,7 @@ from System.Collections.Generic import *
 
 from ThermoFisher.CommonCore.Data import ToleranceUnits
 from ThermoFisher.CommonCore.Data import Extensions
-from ThermoFisher.CommonCore.Data.Business import ChromatogramSignal, ChromatogramTraceSettings, DataUnits, Device, GenericDataTypes, SampleType, Scan, TraceType
+from ThermoFisher.CommonCore.Data.Business import ChromatogramSignal, ChromatogramTraceSettings, DataUnits, Device, GenericDataTypes, SampleType, Scan, TraceType, MassOptions, Range
 from ThermoFisher.CommonCore.Data.FilterEnums import IonizationModeType, MSOrderType
 from ThermoFisher.CommonCore.Data.Interfaces import IChromatogramSettings, IScanEventBase, IScanFilter, RawFileClassification
 from ThermoFisher.CommonCore.MassPrecisionEstimator import PrecisionEstimate
@@ -84,7 +84,7 @@ class RawFileReader:
                 raise RawFileNotOpenError(f"Failed open RAW file: {self.file_name}")
 
         else:
-            # logger.error(f"Failed to open {self.file_path}")
+            logger.error(f"Failed to open {self.file_path}")
             raise RawFileNotOpenError(f"Failed to open {self.file_path}")
 
 
@@ -222,9 +222,45 @@ class RawFileReader:
         whole_spectrum = pd.concat(scan_list)
         return whole_spectrum
 
+    def get_eic(self, mz: float, _tolerance: float) -> pd.DataFrame:
+        # Read the MS data
+        filterMs = "ms"
+
+        # Create the chromatogram trace settings for TIC (Total Ion Chromatogram)
+        traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
+        traceSettings.Filter = filterMs
+        traceSettings.MassRanges = [Range(mz, mz)]
+
+        # Open MS data
+        self.rawFile.SelectInstrument(Device.MS, 1)
+
+        # Create the list (array) of chromatogram settings
+        allSettings = [traceSettings]
+
+        # Set tolerance of +/- 0.05 amu
+        tolerance = MassOptions()
+        tolerance.Tolerance = _tolerance
+        tolerance.ToleranceUnits = ToleranceUnits.amu
+
+        data = self.rawFile.GetChromatogramData(allSettings, -1, -1, tolerance)
+        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
+        rts = DotNetArrayToNPArray(data.PositionsArray, float)
+        scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
+
+        data = pd.DataFrame({
+            "Scan": scans[0],
+            "RetentionTime": rts[0],
+            "Intensity": intensities[0]
+        })
+        data.set_index('Scan', inplace=True)
+        return data
+
+
+
+
 
 
 
 if __name__ == "__main__":
-    raw_file = RawFileReader(r"../Data/blank-test.raw")
-    raw_file.to_mzml("test.mzml")
+    raw_file = RawFileReader(r"../Data/exp022_250306_FF_Folates_nc1_TH_3_015.raw")
+    raw_file.get_eic(440.1324, 0.05).to_clipboard()
