@@ -222,7 +222,7 @@ class RawFileReader:
         whole_spectrum = pd.concat(scan_list)
         return whole_spectrum
 
-    def get_eic(self, mz: float, _tolerance: float) -> pd.DataFrame:
+    def get_eic(self, mz: float, _tolerance: float = 0.05) -> pd.DataFrame:
         # Read the MS data
         filterMs = "ms"
 
@@ -255,12 +255,3 @@ class RawFileReader:
         data.set_index('Scan', inplace=True)
         return data
 
-
-
-
-
-
-
-if __name__ == "__main__":
-    raw_file = RawFileReader(r"../Data/exp022_250306_FF_Folates_nc1_TH_3_015.raw")
-    raw_file.get_eic(440.1324, 0.05).to_clipboard()
