@@ -222,7 +222,7 @@ class RawFileReader:
         whole_spectrum = pd.concat(scan_list)
         return whole_spectrum
 
-    def get_eic(self, mz: float, _tolerance: float = 0.05) -> pd.DataFrame:
+    def get_eic(self, mz: float, _tolerance: float = 5) -> pd.DataFrame:
         # Read the MS data
         filterMs = "ms"
 
@@ -237,10 +237,10 @@ class RawFileReader:
         # Create the list (array) of chromatogram settings
         allSettings = [traceSettings]
 
-        # Set tolerance of +/- 0.05 amu
+        # Set tolerance of +/- 0.05 ppm
         tolerance = MassOptions()
         tolerance.Tolerance = _tolerance
-        tolerance.ToleranceUnits = ToleranceUnits.amu
+        tolerance.ToleranceUnits = ToleranceUnits.ppm
 
         data = self.rawFile.GetChromatogramData(allSettings, -1, -1, tolerance)
         intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
