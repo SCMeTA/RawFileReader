@@ -188,7 +188,7 @@ class RawFileReader:
             with writer.run(id="run1", instrument_configuration='IC1'):
                 scan_count = self.scan_range[1] - self.scan_range[0] + 1
                 with writer.spectrum_list(count=scan_count), logging_redirect_tqdm():
-                    for scan_number in trange(self.scan_range[0], self.scan_range[1], desc=f"Converting {self.file_name}"):
+                    for scan_number in trange(self.scan_range[0], self.scan_range[1], desc=f"Converting {self.file_name}", leave=False):
                         results = self.get_spectrum(scan_number, include_ms2)
                         if results is None:
                             continue

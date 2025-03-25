@@ -6,6 +6,8 @@ import threading
 import os
 import sys
 import logging
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from .reader import RawFileReader
 
@@ -35,24 +37,29 @@ def convert_folder_to_mzml(input_folder: str, output_folder: str, include_ms2: b
         raw_files = [file for file in raw_files if not "blank" in file.stem.lower()]
     output_files = [Path(output_folder) / f'{raw_file.stem}.mzML' for raw_file in raw_files]
     # RawFileReader(file_path).write_mzml(output_path, include_ms2, filter_threshold)
-    threads = []
     max_threads = 8
     semaphore = threading.Semaphore(max_threads)
 
-    def worker(input_path, output_path, include_ms2, filter_threshold):
+    def worker(input_path, output_path, include_ms2, filter_threshold, progress_bar=None):
         with semaphore:  # Acquire the semaphore
             convert_raw_to_mzml(input_path, output_path, include_ms2, filter_threshold)
+        if progress_bar:
+            progress_bar.update(1)
         # Semaphore is automatically released at the end of this block
     threads = []
-    for input_path, output_path in zip(raw_files, output_files):
-        thread = threading.Thread(target=worker,
-                                  args=(str(input_path), str(output_path), include_ms2, filter_threshold))
-        thread.start()
-        threads.append(thread)
+    progress_bar = tqdm(total=len(raw_files))
+    logging.info("Converting files started")
+    # Redirect logging to tqdm
+    with logging_redirect_tqdm():
+        for input_path, output_path in zip(raw_files, output_files):
+            thread = threading.Thread(target=worker,
+                                      args=(str(input_path), str(output_path), include_ms2, filter_threshold, progress_bar))
+            thread.start()
+            threads.append(thread)
 
-    for thread in threads:
-        thread.join()
-    logging.info("Conversion complete")
+        for thread in threads:
+            thread.join()
+        logging.info("Conversion complete")
 
 
 @click.command(name='convert folder')
