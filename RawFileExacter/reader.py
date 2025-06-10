@@ -241,10 +241,12 @@ class RawFileReader:
                         )
 
 
-    def to_dataframe(self, include_ms2: bool = False) -> pd.DataFrame:
+    def to_dataframe(self, include_ms2: bool = False, filter_threshold: int | None = None) -> pd.DataFrame:
         with logging_redirect_tqdm():
             scan_list = [
-                spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in trange(self.scan_range[0], self.scan_range[1],desc=f"Reading {self.file_name}", leave=False))
+                spectrum for spectrum in (self.to_series(scan, include_ms2, filter_threshold) for scan in trange(
+                    self.scan_range[0], self.scan_range[1],desc=f"Reading {self.file_name}", leave=False, bar_format= "{l_bar}{bar:10}{r_bar}{bar:-10b}"
+                ))
                 if spectrum is not None
             ]
         whole_spectrum = pd.concat(scan_list)
