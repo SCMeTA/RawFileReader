@@ -63,8 +63,8 @@ class RawFileNotOpenError(Exception):
 
 
 class RawFileReader:
-    def __init__(self, file_path: str):
-        self.file_path: str = file_path
+    def __init__(self, file_path: str | Path):
+        self.file_path: str | Path = file_path
         self.file_name = Path(file_path).stem
         self.rawFile = self.__open_raw_file()
         self.scan_range: list = self.__get_scan_number()
@@ -72,7 +72,7 @@ class RawFileReader:
         self.max_retention_time: float = self.rawFile.RetentionTimeFromScanNumber(self.scan_range[1])
 
     def __open_raw_file(self):
-        raw_file = RawFileReaderAdapter.FileFactory(self.file_path)
+        raw_file = RawFileReaderAdapter.FileFactory(str(self.file_path))
         if raw_file.IsOpen:
             # logger.info(f"Successfully opened {self.file_path}")
             # print("Successfully open the file")
