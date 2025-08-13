@@ -1,8 +1,6 @@
+from numpy import ndarray
 from pythonnet import load
 import logging
-
-from platform import system as platform_system
-
 
 load("coreclr")
 
@@ -65,15 +63,16 @@ class RawFileNotOpenError(Exception):
 
 
 class RawFileReader:
-    def __init__(self, file_path: str):
-        self.file_path: str = file_path
+    def __init__(self, file_path: str | Path):
+        self.file_path: str | Path = file_path
         self.file_name = Path(file_path).stem
         self.rawFile = self.__open_raw_file()
         self.scan_range: list = self.__get_scan_number()
         self.instrument_info: dict = self.__get_instrument_info()
+        self.max_retention_time: float = self.rawFile.RetentionTimeFromScanNumber(self.scan_range[1])
 
     def __open_raw_file(self):
-        raw_file = RawFileReaderAdapter.FileFactory(self.file_path)
+        raw_file = RawFileReaderAdapter.FileFactory(str(self.file_path))
         if raw_file.IsOpen:
             # logger.info(f"Successfully opened {self.file_path}")
             # print("Successfully open the file")
@@ -140,25 +139,54 @@ class RawFileReader:
         # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
         return retention_time, ms_order, masses, intensities, polarity, is_centroid
 
-    def intensity_filter(self, threshold: int, mz_array: np.array, intensity: np.array):
+    @staticmethod
+    def __intensity_filter(threshold: int, mz_array: np.array, intensity: np.array):
         # filter the intensity and also remove the mz values
         indices_to_keep = np.where(intensity > threshold)
         return mz_array[indices_to_keep], intensity[indices_to_keep]
 
-    def to_series(self, scan_number: int, include_ms2: bool = False) -> pd.Series | None:
+    def __single_scan_to_np_array(self, scan_number: int, include_ms2: bool = False, filter_threshold: int | None = None) -> np.ndarray | None:
         __spec_data = self.get_spectrum(scan_number, include_ms2)
         if __spec_data is None:
             return None
         else:
             retention_time, ms_order, masses, intensities, polarity, is_centroid = __spec_data
             polarity = -1 if polarity == "negative scan" else 1
+            if filter_threshold:
+                masses, intensities = self.__intensity_filter(filter_threshold, masses, intensities)
+                masses = np.round(masses, 6)
+                intensities = np.round(intensities, 2)
+        return np.array([
+            masses,
+            intensities,
+        ])
+
+    def to_numpy(self, include_ms2: bool = False, filter_threshold: int | None = None) -> np.ndarray:
+        with logging_redirect_tqdm():
+            whole_spectrum = [
+                spectrum for spectrum in (self.__single_scan_to_np_array(scan, include_ms2, filter_threshold) for scan in trange(self.scan_range[0], self.scan_range[1]))
+                if spectrum is not None
+            ]
+        return np.array(whole_spectrum, dtype=object)
+
+    def to_series(self, scan_number: int, include_ms2: bool = False, filter_threshold: int | None = None) -> pd.DataFrame | None:
+        __spec_data = self.get_spectrum(scan_number, include_ms2)
+        if __spec_data is None:
+            return None
+        else:
+            retention_time, ms_order, masses, intensities, polarity, is_centroid = __spec_data
+            polarity = -1 if polarity == "negative scan" else 1
+        if filter_threshold:
+            masses, intensities = self.__intensity_filter(filter_threshold, masses, intensities)
+            masses = np.round(masses, 6)
+            intensities = np.round(intensities, 2)
         return pd.DataFrame(
             {
                 "Scan": scan_number,
                 "RetentionTime": round(retention_time, 3),
                 "MS Order": ms_order,
-                "Mass": masses.round(decimals=6),
-                "Intensity": intensities.round(2),
+                "Mass": masses,
+                "Intensity": intensities,
                 "Polarity": polarity
             }
         )
@@ -195,7 +223,7 @@ class RawFileReader:
                         retention_time, ms_order, mz_array, intensity_array, polarity, is_centroid = results
                         scan_id = f"scan={scan_number}"
                         if filter_threshold:
-                            mz_array, intensity_array = self.intensity_filter(filter_threshold, mz_array, intensity_array)
+                            mz_array, intensity_array = self.__intensity_filter(filter_threshold, mz_array, intensity_array)
                             mz_array = np.round(mz_array, 5)
                             intensity_array = np.round(intensity_array, 2)
                         writer.write_spectrum(
@@ -216,13 +244,13 @@ class RawFileReader:
     def to_dataframe(self, include_ms2: bool = False) -> pd.DataFrame:
         with logging_redirect_tqdm():
             scan_list = [
-                spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in trange(self.scan_range[0], self.scan_range[1]))
+                spectrum for spectrum in (self.to_series(scan, include_ms2) for scan in trange(self.scan_range[0], self.scan_range[1],desc=f"Reading {self.file_name}", leave=False))
                 if spectrum is not None
             ]
         whole_spectrum = pd.concat(scan_list)
         return whole_spectrum
 
-    def get_eic(self, mz: float, _tolerance: float = 5) -> pd.DataFrame:
+    def get_eic(self, mz: float, _tolerance: float = 5, start_scan: int = -1, end_scan: int = -1) -> pd.DataFrame:
         # Read the MS data
         filterMs = "ms"
 
@@ -242,7 +270,7 @@ class RawFileReader:
         tolerance.Tolerance = _tolerance
         tolerance.ToleranceUnits = ToleranceUnits.ppm
 
-        data = self.rawFile.GetChromatogramData(allSettings, -1, -1, tolerance)
+        data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
         intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
         rts = DotNetArrayToNPArray(data.PositionsArray, float)
         scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
@@ -254,4 +282,44 @@ class RawFileReader:
         })
         data.set_index('Scan', inplace=True)
         return data
+
+    def get_eics(self, mz_list: list[float], _tolerance) -> pd.DataFrame:
+        # Read the MS data
+        filterMs = "ms"
+
+        # Create the chromatogram trace settings for TIC (Total Ion Chromatogram)
+        traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
+        traceSettings.Filter = filterMs
+
+        # Open MS data
+        self.rawFile.SelectInstrument(Device.MS, 1)
+
+        # Create the list (array) of chromatogram settings
+        allSettings = [traceSettings]
+
+        # Set tolerance of +/- 0.05 ppm
+        tolerance = MassOptions()
+        tolerance.Tolerance = _tolerance
+        tolerance.ToleranceUnits = ToleranceUnits.ppm
+        df = None
+        for mz in mz_list:
+            traceSettings.MassRanges = [Range(mz, mz)]
+            # Get the chromatogram data
+            data = self.rawFile.GetChromatogramData(allSettings, -1, -1, tolerance)
+            intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
+            rts = DotNetArrayToNPArray(data.PositionsArray, float)
+            scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
+            if df is None:
+                df = pd.DataFrame({
+                    "Scan": scans[0],
+                    "RetentionTime": rts[0],
+                    mz: intensities[0]
+                })
+            else:
+                df[mz] = intensities[0]
+
+        df.set_index('Scan', inplace=True)
+        return df
+
+
 
