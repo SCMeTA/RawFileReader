@@ -283,40 +283,40 @@ class RawFileReader:
         data.set_index('Scan', inplace=True)
         return data
 
-    def get_eics(self, mz_list: list[float], _tolerance) -> pd.DataFrame:
-        # Read the MS data
-        filterMs = "ms"
-
-        # Create the chromatogram trace settings for TIC (Total Ion Chromatogram)
-        traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
-        traceSettings.Filter = filterMs
+    def get_eics(self, mz_list: list[float], _tolerance: float = 5, start_scan: int = -1,
+                 end_scan: int = -1) -> pd.DataFrame:
+        if not mz_list:
+            return pd.DataFrame()
 
         # Open MS data
         self.rawFile.SelectInstrument(Device.MS, 1)
 
-        # Create the list (array) of chromatogram settings
-        allSettings = [traceSettings]
-
-        # Set tolerance of +/- 0.05 ppm
+        # Set tolerance
         tolerance = MassOptions()
         tolerance.Tolerance = _tolerance
         tolerance.ToleranceUnits = ToleranceUnits.ppm
-        df = None
+
+        allSettings = []
         for mz in mz_list:
+            traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
+            traceSettings.Filter = "ms"
             traceSettings.MassRanges = [Range(mz, mz)]
-            # Get the chromatogram data
-            data = self.rawFile.GetChromatogramData(allSettings, -1, -1, tolerance)
-            intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
-            rts = DotNetArrayToNPArray(data.PositionsArray, float)
-            scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
-            if df is None:
-                df = pd.DataFrame({
-                    "Scan": scans[0],
-                    "RetentionTime": rts[0],
-                    mz: intensities[0]
-                })
-            else:
-                df[mz] = intensities[0]
+            allSettings.append(traceSettings)
+
+
+        data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
+
+
+        scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
+        rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+
+        df = pd.DataFrame({
+            "Scan": scans,
+            "RetentionTime": rts,
+        })
+        for i, mz in enumerate(mz_list):
+            intensities = DotNetArrayToNPArray(data.IntensitiesArray[i], float)
+            df[mz] = intensities
 
         df.set_index('Scan', inplace=True)
         return df
