@@ -284,7 +284,18 @@ class RawFileReader:
         return data
 
     def get_eics(self, mz_list: list[float], _tolerance: float = 5, start_scan: int = -1,
-                 end_scan: int = -1) -> pd.DataFrame:
+                 end_scan: int = -1):
+        """
+        Get Extracted Ion Chromatograms (EICs) for a list of m/z values.
+        Args:
+            mz_list: list of m/z values to extract
+            _tolerance: tolerance in ppm
+            start_scan: start scan number, -1 for the first scan
+            end_scan: end scan number, -1 for the last scan
+
+        Returns:
+
+        """
         if not mz_list:
             return pd.DataFrame()
 
@@ -306,20 +317,11 @@ class RawFileReader:
 
         data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
 
-
         scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
         rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float).T
 
-        df = pd.DataFrame({
-            "Scan": scans,
-            "RetentionTime": rts,
-        })
-        for i, mz in enumerate(mz_list):
-            intensities = DotNetArrayToNPArray(data.IntensitiesArray[i], float)
-            df[mz] = intensities
-
-        df.set_index('Scan', inplace=True)
-        return df
+        return scans, rts, intensities
 
 
 
