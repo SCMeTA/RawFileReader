@@ -11,5 +11,23 @@ dependencies = [
     "pythonnet>=3.0.5",
     "tqdm>=4.67.1",
 ]
+authors = [
+    {name = "Xingyu Pan", email = "estrellaxd05@gmail.com"},
+]
+
+
 [tool.setuptools.packages.find]
 where = ["src"]
+# inlude lib in package
+include = ["RawFileReader*", "RawFileReader.*"]
+
+[tool.setuptools.package-data]
+"RawFileReader" = ["lib/*"]
+
+[tool.uv.sources]
+rawfilereader = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "rawfilereader",
+]

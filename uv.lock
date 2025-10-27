@@ -372,6 +372,11 @@ dependencies = [
     { name = "tqdm" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "rawfilereader" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.3.4" },
@@ -380,6 +385,9 @@ requires-dist = [
     { name = "pythonnet", specifier = ">=3.0.5" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "rawfilereader", virtual = "." }]
 
 [[package]]
 name = "six"

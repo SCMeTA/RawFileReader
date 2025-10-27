@@ -268,26 +268,30 @@ class RawFileReader:
         # Create the chromatogram trace settings for TIC (Total Ion Chromatogram)
         traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
         traceSettings.Filter = filterMs
-        if isinstance(mz, list):
-            traceSettings.MassRanges = [Range(mz_value, mz_value) for mz_value in mz]
-        else:
-            traceSettings.MassRanges = [Range(mz, mz)]
+        allSettings = []
+        if isinstance(mz, float):
+            mz = [mz]
+        for m in mz:
+            traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
+            traceSettings.Filter = "ms"
+            traceSettings.MassRanges = [Range(m, m)]
+            allSettings.append(traceSettings)
+
 
         # Open MS data
         self.rawFile.SelectInstrument(Device.MS, 1)
 
-        # Create the list (array) of chromatogram settings
-        allSettings = [traceSettings]
 
-        # Set tolerance of +/- 0.05 ppm
         tolerance = MassOptions()
         tolerance.Tolerance = _tolerance
         tolerance.ToleranceUnits = ToleranceUnits.ppm
 
         data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
-        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
-        rts = DotNetArrayToNPArray(data.PositionsArray, float)
-        scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
+
+
+        scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
+        rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float).T
 
         return scans, rts, intensities
 
