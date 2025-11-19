@@ -1,8 +1,6 @@
-streamlit
 pandas
 pythonnet
 click
 numpy
 tqdm
 psims
-pyside6
