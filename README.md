@@ -7,3 +7,26 @@ RawFileReaderExample.cs shows how to access a RAW file using RawFileReader and r
 
 
 Example
+## RawFileReader in python
+
+This is the rebuild of RawFileReader to be used in python. To use it, you should install the following dependencies:
+- Microsoft.NET 8.0 SDK[https://dotnet.microsoft.com/en-us/download/dotnet/8.0]
+
+
+To build the RawFileReader, you should run the following command in the terminal:
+```bash
+pip install src/RawFileReaderPython
+```
+
+## Quick Start
+
+To use RawFileReader in python, you can use the following code snippet:
+```python
+from RawFileReader import RawFileReader
+
+path_to_raw = "path/to/your/file.raw"
+reader = RawFileReader(path_to_raw)
+
+reader.to_mzml("output.mzML")
+```
+

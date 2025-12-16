@@ -1,6 +1,4 @@
-from numpy import ndarray
 from pythonnet import load
-import logging
 
 load("coreclr")
 
@@ -250,76 +248,92 @@ class RawFileReader:
         whole_spectrum = pd.concat(scan_list)
         return whole_spectrum
 
-    def get_eic(self, mz: float, _tolerance: float = 5, start_scan: int = -1, end_scan: int = -1) -> pd.DataFrame:
+    def extract_eic(self, mz: float | list[float], _tolerance: float = 5, start_scan: int = -1, end_scan: int = -1) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract Extracted Ion Chromatogram (EIC) for a given m/z value or list of m/z values.
+        Args:
+            mz: float | list of float, m/z value(s) to extract
+            _tolerance: tolerance in ppm
+            start_scan: start scan number, -1 for the first scan
+            end_scan: end scan number, -1 for the last scan
+
+        Returns:
+            scans: np.ndarray, scan numbers
+            rts: np.ndarray, retention times
+            intensities: np.ndarray, intensities
+        """
         # Read the MS data
         filterMs = "ms"
 
         # Create the chromatogram trace settings for TIC (Total Ion Chromatogram)
         traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
         traceSettings.Filter = filterMs
-        traceSettings.MassRanges = [Range(mz, mz)]
+        allSettings = []
+        if isinstance(mz, float):
+            mz = [mz]
+        for m in mz:
+            traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
+            traceSettings.Filter = "ms"
+            traceSettings.MassRanges = [Range(m, m)]
+            allSettings.append(traceSettings)
+
 
         # Open MS data
         self.rawFile.SelectInstrument(Device.MS, 1)
 
-        # Create the list (array) of chromatogram settings
-        allSettings = [traceSettings]
 
-        # Set tolerance of +/- 0.05 ppm
         tolerance = MassOptions()
         tolerance.Tolerance = _tolerance
         tolerance.ToleranceUnits = ToleranceUnits.ppm
 
         data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
-        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
-        rts = DotNetArrayToNPArray(data.PositionsArray, float)
-        scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
 
-        data = pd.DataFrame({
-            "Scan": scans[0],
-            "RetentionTime": rts[0],
-            "Intensity": intensities[0]
-        })
-        data.set_index('Scan', inplace=True)
-        return data
 
-    def get_eics(self, mz_list: list[float], _tolerance) -> pd.DataFrame:
-        # Read the MS data
-        filterMs = "ms"
+        scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
+        rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float).T
 
-        # Create the chromatogram trace settings for TIC (Total Ion Chromatogram)
-        traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
-        traceSettings.Filter = filterMs
+        return scans, rts, intensities
 
-        # Open MS data
-        self.rawFile.SelectInstrument(Device.MS, 1)
-
-        # Create the list (array) of chromatogram settings
-        allSettings = [traceSettings]
-
-        # Set tolerance of +/- 0.05 ppm
-        tolerance = MassOptions()
-        tolerance.Tolerance = _tolerance
-        tolerance.ToleranceUnits = ToleranceUnits.ppm
-        df = None
-        for mz in mz_list:
-            traceSettings.MassRanges = [Range(mz, mz)]
-            # Get the chromatogram data
-            data = self.rawFile.GetChromatogramData(allSettings, -1, -1, tolerance)
-            intensities = DotNetArrayToNPArray(data.IntensitiesArray, float)
-            rts = DotNetArrayToNPArray(data.PositionsArray, float)
-            scans = DotNetArrayToNPArray(data.ScanNumbersArray, int)
-            if df is None:
-                df = pd.DataFrame({
-                    "Scan": scans[0],
-                    "RetentionTime": rts[0],
-                    mz: intensities[0]
-                })
-            else:
-                df[mz] = intensities[0]
-
-        df.set_index('Scan', inplace=True)
-        return df
+    # def get_eics(self, mz_list: list[float], _tolerance: float = 5, start_scan: int = -1,
+    #              end_scan: int = -1):
+    #     """
+    #     Get Extracted Ion Chromatograms (EICs) for a list of m/z values.
+    #     Args:
+    #         mz_list: list of m/z values to extract
+    #         _tolerance: tolerance in ppm
+    #         start_scan: start scan number, -1 for the first scan
+    #         end_scan: end scan number, -1 for the last scan
+    #
+    #     Returns:
+    #
+    #     """
+    #     if not mz_list:
+    #         return pd.DataFrame()
+    #
+    #     # Open MS data
+    #     self.rawFile.SelectInstrument(Device.MS, 1)
+    #
+    #     # Set tolerance
+    #     tolerance = MassOptions()
+    #     tolerance.Tolerance = _tolerance
+    #     tolerance.ToleranceUnits = ToleranceUnits.ppm
+    #
+    #     allSettings = []
+    #     for mz in mz_list:
+    #         traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
+    #         traceSettings.Filter = "ms"
+    #         traceSettings.MassRanges = [Range(mz, mz)]
+    #         allSettings.append(traceSettings)
+    #
+    #
+    #     data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
+    #
+    #     scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
+    #     rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+    #     intensities = DotNetArrayToNPArray(data.IntensitiesArray, float).T
+    #
+    #     return scans, rts, intensities
 
 
 

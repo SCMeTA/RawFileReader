@@ -1,0 +1,37 @@
+[project]
+name = "RawFileReader"
+version = "0.1.0"
+description = "RawFileReader is a Python package that provides an interface to read Thermo Fisher Scientific RAW files using the official RawFileReader .NET library."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.3.1",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "psims>=1.3.5",
+    "pythonnet>=3.0.5",
+    "tqdm>=4.67.1",
+]
+authors = [
+    {name = "Xingyu Pan", email = "estrellaxd05@gmail.com"},
+]
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# inlude lib in package
+include = ["RawFileReader*", "RawFileReader.*"]
+
+[tool.setuptools.package-data]
+"RawFileReader" = ["lib/*"]
+
+[tool.uv.sources]
+rawfilereader = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "rawfilereader",
+]
+
+[project.urls]
+"Install .NET SDK" = "https://dotnet.microsoft.com/en-us/download/dotnet/8.0"
