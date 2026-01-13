@@ -11,8 +11,6 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 import logging
 from pathlib import Path
 
-from psims.mzml import MzMLWriter
-
 # get absolute path of the current file
 import os
 
@@ -134,8 +132,22 @@ class RawFileReader:
             masses = DotNetArrayToNPArray(segmented_scan.Positions, float)
             intensities = DotNetArrayToNPArray(segmented_scan.Intensities, float)
             is_centroid = False
-        # scan.reindex(columns=['Scan', 'RetentionTime', 'MS Order', 'Mass', 'Intensity'])
-        return retention_time, ms_order, masses, intensities, polarity, is_centroid
+        precursor = None
+        if ms_order > 1:
+            scan_event = IScanEventBase(self.rawFile.GetScanEventForScanNumber(scan_number))
+            if scan_event is not None:
+                reaction = scan_event.GetReaction(0)
+                isolation_width = float(reaction.IsolationWidth) if reaction.IsolationWidth is not None else None
+                collision_energy = reaction.CollisionEnergy
+                collision_energy = float(collision_energy) if collision_energy is not None else None
+                if collision_energy is not None and np.isnan(collision_energy):
+                    collision_energy = None
+                precursor = {
+                    "mz": float(reaction.PrecursorMass),
+                    "isolation_width": isolation_width,
+                    "collision_energy": collision_energy,
+                }
+        return retention_time, ms_order, masses, intensities, polarity, is_centroid, precursor
 
     @staticmethod
     def __intensity_filter(threshold: int, mz_array: np.array, intensity: np.array):
@@ -148,7 +160,7 @@ class RawFileReader:
         if __spec_data is None:
             return None
         else:
-            retention_time, ms_order, masses, intensities, polarity, is_centroid = __spec_data
+            retention_time, ms_order, masses, intensities, polarity, is_centroid, precursor = __spec_data
             polarity = -1 if polarity == "negative scan" else 1
             if filter_threshold:
                 masses, intensities = self.__intensity_filter(filter_threshold, masses, intensities)
@@ -157,7 +169,8 @@ class RawFileReader:
         return np.array([
             masses,
             intensities,
-        ])
+            precursor,
+        ], dtype=object)
 
     def to_numpy(self, include_ms2: bool = False, filter_threshold: int | None = None) -> np.ndarray:
         with logging_redirect_tqdm():
@@ -172,12 +185,27 @@ class RawFileReader:
         if __spec_data is None:
             return None
         else:
-            retention_time, ms_order, masses, intensities, polarity, is_centroid = __spec_data
+            retention_time, ms_order, masses, intensities, polarity, is_centroid, precursor = __spec_data
             polarity = -1 if polarity == "negative scan" else 1
         if filter_threshold:
             masses, intensities = self.__intensity_filter(filter_threshold, masses, intensities)
             masses = np.round(masses, 6)
             intensities = np.round(intensities, 2)
+        precursor_mz = np.nan
+        precursor_charge = np.nan
+        isolation_width = np.nan
+        collision_energy = np.nan
+        if precursor:
+            precursor_mz = precursor["mz"] if precursor["mz"] is not None else np.nan
+            # precursor_charge = precursor["charge"] if precursor["charge"] is not None else np.nan
+            isolation_width = precursor["isolation_width"] if precursor["isolation_width"] is not None else np.nan
+            collision_energy = precursor["collision_energy"] if precursor["collision_energy"] is not None else np.nan
+        row_count = masses.shape[0]
+        precursor_mz_col = np.full(row_count, precursor_mz)
+        # precursor_charge_col = np.full(row_count, precursor_charge)
+        isolation_width_col = np.full(row_count, isolation_width)
+        collision_energy_col = np.full(row_count, collision_energy)
+
         return pd.DataFrame(
             {
                 "Scan": scan_number,
@@ -185,12 +213,21 @@ class RawFileReader:
                 "MS Order": ms_order,
                 "Mass": masses,
                 "Intensity": intensities,
-                "Polarity": polarity
+                "Polarity": polarity,
+                "PrecursorMz": precursor_mz_col,
+                # "PrecursorCharge": precursor_charge_col,
+                "IsolationWidth": isolation_width_col,
+                "CollisionEnergy": collision_energy_col,
             }
         )
 
-    def to_mzml(self, output_path: str, include_ms2: bool = False, filter_threshold: int | None = None):
-        with MzMLWriter(output_path) as writer:
+    def to_mzml(self, output_path: str | Path, include_ms2: bool = False, filter_threshold: int | None = None) -> None:
+        from psims.mzml import MzMLWriter
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with MzMLWriter(str(output_path)) as writer:
             writer.controlled_vocabularies()
             writer.file_description([
                 "MS1 spectrum",
@@ -202,28 +239,55 @@ class RawFileReader:
             source = writer.Source(1, ["electrospray ionization", "electrospray inlet"])
             analyzer = writer.Analyzer(2, ["fourier transform ion cyclotron resonance mass spectrometer"])
             detector = writer.Detector(3, ["inductive detector"])
-            config = writer.InstrumentConfiguration(id="IC1", component_list=[source, analyzer, detector], params=["Orbitrap-Astral"])
+            config = writer.InstrumentConfiguration(
+                id="IC1",
+                component_list=[source, analyzer, detector],
+                params=[self.instrument_info.get("instrument_model", "Orbitrap")]
+            )
             writer.instrument_configuration_list([config])
             methods = [
-                writer.ProcessingMethod(order=1, software_reference="psims-writer", params=[
-                    "Conversion to mzML"
-                ])
+                writer.ProcessingMethod(order=1, software_reference="psims-writer", params=["Conversion to mzML"])
             ]
-            processing = writer.DataProcessing(methods, id='DP1')
+            processing = writer.DataProcessing(methods, id="DP1")
             writer.data_processing_list([processing])
-            with writer.run(id="run1", instrument_configuration='IC1'):
+
+            with writer.run(id="run1", instrument_configuration="IC1"):
                 scan_count = self.scan_range[1] - self.scan_range[0] + 1
                 with writer.spectrum_list(count=scan_count), logging_redirect_tqdm():
-                    for scan_number in trange(self.scan_range[0], self.scan_range[1], desc=f"Converting {self.file_name}", leave=False):
+                    for scan_number in trange(
+                        self.scan_range[0],
+                        self.scan_range[1],
+                        desc=f"Converting {self.file_name}",
+                        leave=False,
+                    ):
                         results = self.get_spectrum(scan_number, include_ms2)
                         if results is None:
                             continue
-                        retention_time, ms_order, mz_array, intensity_array, polarity, is_centroid = results
+                        retention_time, ms_order, mz_array, intensity_array, polarity, is_centroid, precursor = results
                         scan_id = f"scan={scan_number}"
                         if filter_threshold:
                             mz_array, intensity_array = self.__intensity_filter(filter_threshold, mz_array, intensity_array)
                             mz_array = np.round(mz_array, 5)
                             intensity_array = np.round(intensity_array, 2)
+                        precursor_info = None
+                        if precursor:
+                            precursor_mz = precursor["mz"]
+                            isolation_width = precursor.get("isolation_width") or 0.0
+                            half_width = isolation_width / 2 if isolation_width else 0.0
+                            isolation_window = [
+                                precursor_mz - half_width,
+                                precursor_mz,
+                                precursor_mz + half_width,
+                            ]
+                            activation = []
+                            if precursor.get("collision_energy") is not None:
+                                activation.append({"collision energy": precursor["collision_energy"]})
+                            precursor_info = {
+                                "mz": precursor_mz,
+                                # "charge": precursor.get("charge"),
+                                "isolation_window": isolation_window,
+                                "activation": activation,
+                            }
                         writer.write_spectrum(
                             mz_array,
                             intensity_array,
@@ -235,7 +299,8 @@ class RawFileReader:
                                 f"MS{ms_order} spectrum",
                                 {"ms level": ms_order},
                                 {"total ion current": np.sum(intensity_array)},
-                            ]
+                            ],
+                            precursor_information=precursor_info,
                         )
 
 
@@ -295,45 +360,32 @@ class RawFileReader:
 
         return scans, rts, intensities
 
-    # def get_eics(self, mz_list: list[float], _tolerance: float = 5, start_scan: int = -1,
-    #              end_scan: int = -1):
-    #     """
-    #     Get Extracted Ion Chromatograms (EICs) for a list of m/z values.
-    #     Args:
-    #         mz_list: list of m/z values to extract
-    #         _tolerance: tolerance in ppm
-    #         start_scan: start scan number, -1 for the first scan
-    #         end_scan: end scan number, -1 for the last scan
-    #
-    #     Returns:
-    #
-    #     """
-    #     if not mz_list:
-    #         return pd.DataFrame()
-    #
-    #     # Open MS data
-    #     self.rawFile.SelectInstrument(Device.MS, 1)
-    #
-    #     # Set tolerance
-    #     tolerance = MassOptions()
-    #     tolerance.Tolerance = _tolerance
-    #     tolerance.ToleranceUnits = ToleranceUnits.ppm
-    #
-    #     allSettings = []
-    #     for mz in mz_list:
-    #         traceSettings = ChromatogramTraceSettings(TraceType.MassRange)
-    #         traceSettings.Filter = "ms"
-    #         traceSettings.MassRanges = [Range(mz, mz)]
-    #         allSettings.append(traceSettings)
-    #
-    #
-    #     data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
-    #
-    #     scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
-    #     rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
-    #     intensities = DotNetArrayToNPArray(data.IntensitiesArray, float).T
-    #
-    #     return scans, rts, intensities
+    def extract_tic(self, start_scan: int = -1, end_scan: int = -1) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract Total Ion Chromatogram (TIC) from the raw file.
 
+        Args:
+            start_scan: start scan number, -1 for the first scan
+            end_scan: end scan number, -1 for the last scan
 
+        Returns:
+            scans: np.ndarray, scan numbers
+            rts: np.ndarray, retention times
+            intensities: np.ndarray, total ion current intensities
+        """
+        # Create the chromatogram trace settings for TIC
+        traceSettings = ChromatogramTraceSettings(TraceType.TIC)
+        traceSettings.Filter = "ms"
+
+        # Open MS data
+        self.rawFile.SelectInstrument(Device.MS, 1)
+
+        # Get the chromatogram data
+        data = self.rawFile.GetChromatogramData([traceSettings], start_scan, end_scan)
+
+        scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
+        rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+        intensities = DotNetArrayToNPArray(data.IntensitiesArray[0], float)
+
+        return scans, rts, intensities
 
