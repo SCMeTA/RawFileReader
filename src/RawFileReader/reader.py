@@ -749,7 +749,12 @@ class RawFileReader:
 
         scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
         rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
-        intensities = DotNetArrayToNPArray(data.IntensitiesArray, float).T
+        # IntensitiesArray is a 2D .NET array - convert each row separately
+        n_mz = data.IntensitiesArray.Length
+        intensities = np.array([
+            DotNetArrayToNPArray(data.IntensitiesArray[i], float)
+            for i in range(n_mz)
+        ]).T
 
         return scans, rts, intensities
 
