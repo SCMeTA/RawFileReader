@@ -177,3 +177,12 @@ cython_debug/
 
 test.py
 .example.py.swp
+
+# C# / .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.pdb
+*.nupkg
