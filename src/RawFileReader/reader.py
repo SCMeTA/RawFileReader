@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pythonnet import load
 
 load("coreclr")
@@ -26,6 +28,7 @@ clr.AddReference('ThermoFisher.CommonCore.Data')
 clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
 clr.AddReference('ThermoFisher.CommonCore.BackgroundSubtraction')
 clr.AddReference('ThermoFisher.CommonCore.MassPrecisionEstimator')
+clr.AddReference('ParallelRawFileReader')
 
 from System import *
 from System.Collections.Generic import *
@@ -38,10 +41,19 @@ from ThermoFisher.CommonCore.Data.Interfaces import IChromatogramSettings, IScan
 from ThermoFisher.CommonCore.MassPrecisionEstimator import PrecisionEstimate
 from ThermoFisher.CommonCore.RawFileReader import RawFileReaderAdapter
 from ThermoFisher.CommonCore.Data.Business import RawFileReaderFactory
+from ParallelRawFileReader import ParallelReader as CSharpParallelReader
+from ParallelRawFileReader import MultiFileReader as CSharpMultiFileReader
 
 # Import for parallel processing
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
+
+# Optional Polars import for faster DataFrame construction
+try:
+    import polars as pl
+    HAS_POLARS = True
+except ImportError:
+    HAS_POLARS = False
 
 logger = logging.getLogger(__name__)
 
@@ -769,4 +781,324 @@ class RawFileReader:
         intensities = DotNetArrayToNPArray(data.IntensitiesArray[0], float)
 
         return scans, rts, intensities
+
+    def to_dataframe_fast(
+        self,
+        include_ms2: bool = False,
+        filter_threshold: float = 0,
+        max_workers: int = 0,
+        use_polars: bool = True
+    ) -> pd.DataFrame:
+        """Convert all scans to DataFrame using C# native parallel processing.
+
+        This is the fastest method for reading scan data, using:
+        - Native C# parallel processing (bypasses Python GIL)
+        - ThermoFisher ThreadManager for lockless parallel access
+        - Polars for fast DataFrame construction (if available)
+
+        Args:
+            include_ms2: Include MS2 spectra in output
+            filter_threshold: Filter peaks below this intensity (0 = no filter)
+            max_workers: Number of parallel workers (0 = auto, max 8)
+            use_polars: Use Polars for DataFrame construction if available
+
+        Returns:
+            pandas DataFrame with all scan data
+        """
+        # Use C# parallel reader
+        csharp_reader = CSharpParallelReader(str(self.file_path))
+        result = csharp_reader.ReadAllScansParallel(
+            includeMs2=include_ms2,
+            filterThreshold=filter_threshold,
+            maxWorkers=max_workers if max_workers > 0 else 0
+        )
+        csharp_reader.Dispose()
+
+        # Convert to DataFrame using Polars or Pandas
+        if use_polars and HAS_POLARS:
+            return self._bulk_result_to_dataframe_polars(result)
+        else:
+            return self._bulk_result_to_dataframe_pandas(result)
+
+    def _bulk_result_to_dataframe_polars(self, result) -> pd.DataFrame:
+        """Convert C# BulkScanResult to pandas DataFrame using Polars for speed."""
+        # Convert .NET arrays directly to numpy (faster than list())
+        total_points = int(result.TotalDataPoints)
+        num_scans = int(result.TotalScans)
+
+        # Get flattened data arrays
+        all_masses = np.fromiter(result.AllMasses, dtype=np.float64, count=total_points)
+        all_intensities = np.fromiter(result.AllIntensities, dtype=np.float64, count=total_points)
+
+        # Get per-scan metadata
+        scan_numbers = np.fromiter(result.ScanNumbers, dtype=np.int32, count=num_scans)
+        retention_times = np.fromiter(result.RetentionTimes, dtype=np.float64, count=num_scans)
+        ms_orders = np.fromiter(result.MsOrders, dtype=np.int32, count=num_scans)
+        polarities = np.fromiter(result.Polarities, dtype=np.int32, count=num_scans)
+        precursor_mzs = np.fromiter(result.PrecursorMzs, dtype=np.float64, count=num_scans)
+        isolation_widths = np.fromiter(result.IsolationWidths, dtype=np.float64, count=num_scans)
+        collision_energies = np.fromiter(result.CollisionEnergies, dtype=np.float64, count=num_scans)
+        scan_start_indices = np.fromiter(result.ScanStartIndices, dtype=np.int32, count=num_scans)
+        scan_lengths = np.fromiter(result.ScanLengths, dtype=np.int32, count=num_scans)
+
+        # Use numpy repeat for fast expansion of per-scan values
+        df_scan_numbers = np.repeat(scan_numbers, scan_lengths)
+        df_retention_times = np.repeat(retention_times, scan_lengths)
+        df_ms_orders = np.repeat(ms_orders, scan_lengths)
+        df_polarities = np.repeat(polarities, scan_lengths)
+        df_precursor_mzs = np.repeat(precursor_mzs, scan_lengths)
+        df_isolation_widths = np.repeat(isolation_widths, scan_lengths)
+        df_collision_energies = np.repeat(collision_energies, scan_lengths)
+
+        # Build Polars DataFrame (much faster than pandas for large data)
+        df_polars = pl.DataFrame({
+            "Scan": df_scan_numbers,
+            "RetentionTime": df_retention_times,
+            "MS Order": df_ms_orders,
+            "Mass": all_masses,
+            "Intensity": all_intensities,
+            "Polarity": df_polarities,
+            "PrecursorMz": df_precursor_mzs,
+            "IsolationWidth": df_isolation_widths,
+            "CollisionEnergy": df_collision_energies,
+        })
+
+        # Convert to pandas (zero-copy where possible)
+        return df_polars.to_pandas()
+
+    def _bulk_result_to_dataframe_pandas(self, result) -> pd.DataFrame:
+        """Convert C# BulkScanResult to pandas DataFrame directly."""
+        # Convert .NET arrays to numpy
+        total_points = int(result.TotalDataPoints)
+        num_scans = int(result.TotalScans)
+
+        all_masses = np.fromiter(result.AllMasses, dtype=np.float64, count=total_points)
+        all_intensities = np.fromiter(result.AllIntensities, dtype=np.float64, count=total_points)
+
+        scan_numbers = np.fromiter(result.ScanNumbers, dtype=np.int32, count=num_scans)
+        retention_times = np.fromiter(result.RetentionTimes, dtype=np.float64, count=num_scans)
+        ms_orders = np.fromiter(result.MsOrders, dtype=np.int32, count=num_scans)
+        polarities = np.fromiter(result.Polarities, dtype=np.int32, count=num_scans)
+        precursor_mzs = np.fromiter(result.PrecursorMzs, dtype=np.float64, count=num_scans)
+        isolation_widths = np.fromiter(result.IsolationWidths, dtype=np.float64, count=num_scans)
+        collision_energies = np.fromiter(result.CollisionEnergies, dtype=np.float64, count=num_scans)
+        scan_lengths = np.fromiter(result.ScanLengths, dtype=np.int32, count=num_scans)
+
+        # Use numpy repeat for expansion
+        df_scan_numbers = np.repeat(scan_numbers, scan_lengths)
+        df_retention_times = np.repeat(retention_times, scan_lengths)
+        df_ms_orders = np.repeat(ms_orders, scan_lengths)
+        df_polarities = np.repeat(polarities, scan_lengths)
+        df_precursor_mzs = np.repeat(precursor_mzs, scan_lengths)
+        df_isolation_widths = np.repeat(isolation_widths, scan_lengths)
+        df_collision_energies = np.repeat(collision_energies, scan_lengths)
+
+        return pd.DataFrame({
+            "Scan": df_scan_numbers,
+            "RetentionTime": df_retention_times,
+            "MS Order": df_ms_orders,
+            "Mass": all_masses,
+            "Intensity": all_intensities,
+            "Polarity": df_polarities,
+            "PrecursorMz": df_precursor_mzs,
+            "IsolationWidth": df_isolation_widths,
+            "CollisionEnergy": df_collision_energies,
+        })
+
+    def to_polars(
+        self,
+        include_ms2: bool = False,
+        filter_threshold: float = 0,
+        max_workers: int = 0
+    ):
+        """Convert all scans to Polars DataFrame using C# native parallel processing.
+
+        This returns a native Polars DataFrame (not converted to pandas).
+
+        Args:
+            include_ms2: Include MS2 spectra in output
+            filter_threshold: Filter peaks below this intensity (0 = no filter)
+            max_workers: Number of parallel workers (0 = auto)
+
+        Returns:
+            Polars DataFrame with all scan data
+
+        Raises:
+            ImportError: If Polars is not installed
+        """
+        if not HAS_POLARS:
+            raise ImportError("Polars is not installed. Install with: pip install polars")
+
+        # Use C# parallel reader
+        csharp_reader = CSharpParallelReader(str(self.file_path))
+        result = csharp_reader.ReadAllScansParallel(
+            includeMs2=include_ms2,
+            filterThreshold=filter_threshold,
+            maxWorkers=max_workers if max_workers > 0 else 0
+        )
+        csharp_reader.Dispose()
+
+        # Convert to Polars DataFrame
+        total_points = int(result.TotalDataPoints)
+        num_scans = int(result.TotalScans)
+
+        all_masses = np.fromiter(result.AllMasses, dtype=np.float64, count=total_points)
+        all_intensities = np.fromiter(result.AllIntensities, dtype=np.float64, count=total_points)
+
+        scan_numbers = np.fromiter(result.ScanNumbers, dtype=np.int32, count=num_scans)
+        retention_times = np.fromiter(result.RetentionTimes, dtype=np.float64, count=num_scans)
+        ms_orders = np.fromiter(result.MsOrders, dtype=np.int32, count=num_scans)
+        polarities = np.fromiter(result.Polarities, dtype=np.int32, count=num_scans)
+        precursor_mzs = np.fromiter(result.PrecursorMzs, dtype=np.float64, count=num_scans)
+        isolation_widths = np.fromiter(result.IsolationWidths, dtype=np.float64, count=num_scans)
+        collision_energies = np.fromiter(result.CollisionEnergies, dtype=np.float64, count=num_scans)
+        scan_lengths = np.fromiter(result.ScanLengths, dtype=np.int32, count=num_scans)
+
+        # Use numpy repeat for expansion
+        df_scan_numbers = np.repeat(scan_numbers, scan_lengths)
+        df_retention_times = np.repeat(retention_times, scan_lengths)
+        df_ms_orders = np.repeat(ms_orders, scan_lengths)
+        df_polarities = np.repeat(polarities, scan_lengths)
+        df_precursor_mzs = np.repeat(precursor_mzs, scan_lengths)
+        df_isolation_widths = np.repeat(isolation_widths, scan_lengths)
+        df_collision_energies = np.repeat(collision_energies, scan_lengths)
+
+        return pl.DataFrame({
+            "Scan": df_scan_numbers,
+            "RetentionTime": df_retention_times,
+            "MS Order": df_ms_orders,
+            "Mass": all_masses,
+            "Intensity": all_intensities,
+            "Polarity": df_polarities,
+            "PrecursorMz": df_precursor_mzs,
+            "IsolationWidth": df_isolation_widths,
+            "CollisionEnergy": df_collision_energies,
+        })
+
+
+def read_multiple_files(
+    file_paths: list[str | Path],
+    include_ms2: bool = False,
+    filter_threshold: float = 0,
+    max_files_parallel: int = 0,
+    max_scans_parallel: int = 0,
+    use_polars: bool = True,
+    return_native_polars: bool = False
+) -> dict[str, pd.DataFrame | "pl.DataFrame"]:
+    """Read multiple RAW files in parallel using C# native multi-threading.
+
+    This function processes multiple RAW files concurrently, bypassing Python's
+    GIL limitation by doing all parallel work in native .NET code.
+
+    Args:
+        file_paths: List of paths to RAW files
+        include_ms2: Include MS2 spectra in output
+        filter_threshold: Filter peaks below this intensity (0 = no filter)
+        max_files_parallel: Max files to process concurrently (0 = auto, typically 2-4)
+        max_scans_parallel: Max parallel workers per file for scan reading (0 = auto)
+        use_polars: Use Polars for DataFrame construction (faster)
+        return_native_polars: Return native Polars DataFrames instead of pandas
+
+    Returns:
+        Dictionary mapping file paths to DataFrames. Failed files will have None.
+
+    Example:
+        >>> files = ["/path/to/file1.raw", "/path/to/file2.raw"]
+        >>> results = read_multiple_files(files)
+        >>> for path, df in results.items():
+        ...     if df is not None:
+        ...         print(f"{path}: {df.shape}")
+    """
+    from System import Array, String
+
+    # Convert paths to strings
+    str_paths = [str(p) for p in file_paths]
+    file_array = Array[String](str_paths)
+
+    # Call C# multi-file reader
+    result = CSharpMultiFileReader.ReadMultipleFiles(
+        file_array,
+        includeMs2=include_ms2,
+        filterThreshold=filter_threshold,
+        maxFilesParallel=max_files_parallel if max_files_parallel > 0 else 0,
+        maxScansParallel=max_scans_parallel if max_scans_parallel > 0 else 0
+    )
+
+    # Convert results to DataFrames
+    output = {}
+    for file_result in result.FileResults:
+        file_path = str(file_result.FilePath)
+
+        if not file_result.Success:
+            logger.warning(f"Failed to read {file_result.FileName}: {file_result.ErrorMessage}")
+            output[file_path] = None
+            continue
+
+        bulk_data = file_result.Data
+        df = _bulk_result_to_dataframe(bulk_data, use_polars, return_native_polars)
+        output[file_path] = df
+
+    return output
+
+
+def _bulk_result_to_dataframe(
+    result,
+    use_polars: bool = True,
+    return_native_polars: bool = False
+) -> pd.DataFrame | "pl.DataFrame":
+    """Convert BulkScanResult to DataFrame.
+
+    Internal helper function for converting C# BulkScanResult to DataFrame.
+    """
+    total_points = int(result.TotalDataPoints)
+    num_scans = int(result.TotalScans)
+
+    if total_points == 0:
+        if return_native_polars and HAS_POLARS:
+            return pl.DataFrame()
+        return pd.DataFrame()
+
+    # Extract arrays from C# result
+    all_masses = np.fromiter(result.AllMasses, dtype=np.float64, count=total_points)
+    all_intensities = np.fromiter(result.AllIntensities, dtype=np.float64, count=total_points)
+
+    scan_numbers = np.fromiter(result.ScanNumbers, dtype=np.int32, count=num_scans)
+    retention_times = np.fromiter(result.RetentionTimes, dtype=np.float64, count=num_scans)
+    ms_orders = np.fromiter(result.MsOrders, dtype=np.int32, count=num_scans)
+    polarities = np.fromiter(result.Polarities, dtype=np.int32, count=num_scans)
+    precursor_mzs = np.fromiter(result.PrecursorMzs, dtype=np.float64, count=num_scans)
+    isolation_widths = np.fromiter(result.IsolationWidths, dtype=np.float64, count=num_scans)
+    collision_energies = np.fromiter(result.CollisionEnergies, dtype=np.float64, count=num_scans)
+    scan_lengths = np.fromiter(result.ScanLengths, dtype=np.int32, count=num_scans)
+
+    # Expand per-scan values to per-datapoint using numpy repeat
+    df_scan_numbers = np.repeat(scan_numbers, scan_lengths)
+    df_retention_times = np.repeat(retention_times, scan_lengths)
+    df_ms_orders = np.repeat(ms_orders, scan_lengths)
+    df_polarities = np.repeat(polarities, scan_lengths)
+    df_precursor_mzs = np.repeat(precursor_mzs, scan_lengths)
+    df_isolation_widths = np.repeat(isolation_widths, scan_lengths)
+    df_collision_energies = np.repeat(collision_energies, scan_lengths)
+
+    data = {
+        "Scan": df_scan_numbers,
+        "RetentionTime": df_retention_times,
+        "MS Order": df_ms_orders,
+        "Mass": all_masses,
+        "Intensity": all_intensities,
+        "Polarity": df_polarities,
+        "PrecursorMz": df_precursor_mzs,
+        "IsolationWidth": df_isolation_widths,
+        "CollisionEnergy": df_collision_energies,
+    }
+
+    if return_native_polars:
+        if not HAS_POLARS:
+            raise ImportError("Polars is not installed. Install with: pip install polars")
+        return pl.DataFrame(data)
+
+    if use_polars and HAS_POLARS:
+        return pl.DataFrame(data).to_pandas()
+
+    return pd.DataFrame(data)
 
