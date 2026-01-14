@@ -186,3 +186,7 @@ obj/
 *.cache
 *.pdb
 *.nupkg
+
+
+.claude/
+benchmark/
