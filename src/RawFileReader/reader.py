@@ -746,15 +746,23 @@ class RawFileReader:
 
         data = self.rawFile.GetChromatogramData(allSettings, start_scan, end_scan, tolerance)
 
-
         scans = DotNetArrayToNPArray(data.ScanNumbersArray[0], int)
         rts = DotNetArrayToNPArray(data.PositionsArray[0], float)
+
         # IntensitiesArray is a 2D .NET array - convert each row separately
+        # Handle case where different m/z channels may have different lengths
         n_mz = data.IntensitiesArray.Length
-        intensities = np.array([
-            DotNetArrayToNPArray(data.IntensitiesArray[i], float)
-            for i in range(n_mz)
-        ]).T
+        n_points = len(rts)
+
+        # Pre-allocate array with correct shape
+        intensities = np.zeros((n_points, n_mz), dtype=float)
+
+        for i in range(n_mz):
+            arr = DotNetArrayToNPArray(data.IntensitiesArray[i], float)
+            # Handle length mismatch by taking min length
+            length = min(len(arr), n_points)
+            if length > 0:
+                intensities[:length, i] = arr[:length]
 
         return scans, rts, intensities
 
