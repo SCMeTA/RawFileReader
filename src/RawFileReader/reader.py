@@ -127,6 +127,13 @@ class RawFileNotOpenError(Exception):
         return f"Cannot read RAW file: {self.errors}"
 
 
+class EmptyRawFileError(Exception):
+    """Raised when a RAW file contains no scans."""
+    def __init__(self, file_path):
+        self.file_path = file_path
+        super().__init__(f"RAW file contains no scans: {file_path}")
+
+
 class RawFileReader:
     def __init__(self, file_path: str | Path):
         self.file_path: str | Path = file_path
@@ -155,13 +162,12 @@ class RawFileReader:
     def __get_scan_number(self):
         first_scan = self.rawFile.RunHeaderEx.FirstSpectrum
         last_scan = self.rawFile.RunHeaderEx.LastSpectrum
-        # logger.info(f"First scan: {first_scan}, Last scan: {last_scan}")
-        # print(f"First scan: {first_scan}, Last scan: {last_scan}")
+        # Check for empty file (no scans)
+        if last_scan < 1 or first_scan < 1:
+            raise EmptyRawFileError(self.file_path)
         # Get retention time of the first and last scan
         first_rt = self.rawFile.RetentionTimeFromScanNumber(first_scan)
         last_rt = self.rawFile.RetentionTimeFromScanNumber(last_scan)
-        # logger.info(f"First RT: {first_rt}, Last RT: {last_rt}")
-        # print(f"First RT: {first_rt}, Last RT: {last_rt}")
         return [first_scan, last_scan]
 
     def __get_instrument_info(self):

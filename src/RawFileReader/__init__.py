@@ -27,8 +27,16 @@ if platform.machine().lower() not in ['x86_64', 'amd64', 'x64']:
         f"Current architecture: {platform.machine()}"
     )
 
-from .reader import RawFileReader, read_multiple_files
+from .reader import RawFileReader, read_multiple_files, RawFileNotOpenError, EmptyRawFileError
 from .cli import convert_raw_to_mzml, convert_folder_to_mzml, cli
 
-__all__ = ['RawFileReader', 'read_multiple_files', 'convert_raw_to_mzml', 'convert_folder_to_mzml', 'cli']
+__all__ = [
+    'RawFileReader',
+    'read_multiple_files',
+    'convert_raw_to_mzml',
+    'convert_folder_to_mzml',
+    'cli',
+    'RawFileNotOpenError',
+    'EmptyRawFileError',
+]
 
