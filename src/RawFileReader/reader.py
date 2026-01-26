@@ -1402,3 +1402,150 @@ def _bulk_result_to_dataframe(
         return pl.DataFrame(data).to_pandas()
 
     return pd.DataFrame(data)
+
+
+def extract_eic_multiple_files(
+    file_paths: list[str | Path],
+    mz: float | list[float],
+    tolerance: float = 5,
+    start_scan: int = -1,
+    end_scan: int = -1,
+    max_workers: int | None = None,
+    return_dataframe: bool = False,
+) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray] | pd.DataFrame]:
+    """Extract EIC from multiple RAW files in parallel.
+
+    Uses ThreadPoolExecutor for concurrent file processing. Since the .NET
+    ThermoFisher library does the heavy lifting, this achieves good parallelism
+    despite Python's GIL.
+
+    Args:
+        file_paths: List of paths to RAW files
+        mz: m/z value(s) to extract (float or list of floats)
+        tolerance: Mass tolerance in ppm (default: 5)
+        start_scan: Start scan number (-1 for first scan)
+        end_scan: End scan number (-1 for last scan)
+        max_workers: Number of parallel workers (default: min(8, cpu_count))
+        return_dataframe: If True, return DataFrame instead of numpy arrays
+
+    Returns:
+        Dictionary mapping file paths to results. Each result is either:
+        - Tuple of (scans, rts, intensities) numpy arrays, or
+        - DataFrame with columns [Scan, RetentionTime, mz_1, mz_2, ...] if return_dataframe=True
+        Failed files will have None as value.
+
+    Example:
+        >>> files = ["/path/to/file1.raw", "/path/to/file2.raw"]
+        >>> mz_values = [500.0, 600.0, 700.0]
+        >>> results = extract_eic_multiple_files(files, mz_values, tolerance=10)
+        >>> for path, (scans, rts, intensities) in results.items():
+        ...     if scans is not None:
+        ...         print(f"{path}: {len(scans)} points, {intensities.shape[1]} channels")
+    """
+    if max_workers is None:
+        max_workers = min(8, multiprocessing.cpu_count())
+
+    # Normalize mz to list for consistent handling
+    mz_list = [mz] if isinstance(mz, (int, float)) else list(mz)
+
+    def process_single_file(
+        file_path: str | Path,
+    ) -> tuple[str, tuple | pd.DataFrame | None]:
+        """Process a single file - designed for thread pool execution."""
+        file_path_str = str(file_path)
+        try:
+            reader = RawFileReader(file_path_str)
+            scans, rts, intensities = reader.extract_eic(
+                mz_list, tolerance, start_scan, end_scan
+            )
+
+            if return_dataframe:
+                # Build DataFrame with mz values as column names
+                data = {
+                    "Scan": scans,
+                    "RetentionTime": rts,
+                }
+                for i, m in enumerate(mz_list):
+                    col_name = f"mz_{m:.4f}"
+                    data[col_name] = (
+                        intensities[:, i] if intensities.ndim > 1 else intensities
+                    )
+
+                if HAS_POLARS:
+                    df = pl.DataFrame(data).to_pandas()
+                else:
+                    df = pd.DataFrame(data)
+                return file_path_str, df
+            else:
+                return file_path_str, (scans, rts, intensities)
+
+        except Exception as e:
+            logger.warning(f"Failed to extract EIC from {file_path_str}: {e}")
+            return file_path_str, None
+
+    # Process files in parallel
+    results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_single_file, fp): fp for fp in file_paths}
+
+        for future in as_completed(futures):
+            file_path, result = future.result()
+            results[file_path] = result
+
+    return results
+
+
+def extract_eic_to_dataframe(
+    file_paths: list[str | Path],
+    mz: float | list[float],
+    tolerance: float = 5,
+    start_scan: int = -1,
+    end_scan: int = -1,
+    max_workers: int | None = None,
+) -> pd.DataFrame:
+    """Extract EIC from multiple files and combine into a single DataFrame.
+
+    This is a convenience function that extracts EIC from multiple files
+    and combines all results into a single DataFrame with a 'File' column.
+
+    Args:
+        file_paths: List of paths to RAW files
+        mz: m/z value(s) to extract (float or list of floats)
+        tolerance: Mass tolerance in ppm (default: 5)
+        start_scan: Start scan number (-1 for first scan)
+        end_scan: End scan number (-1 for last scan)
+        max_workers: Number of parallel workers (default: min(8, cpu_count))
+
+    Returns:
+        Combined DataFrame with columns [File, Scan, RetentionTime, mz_X.XXXX, ...]
+
+    Example:
+        >>> files = glob.glob("/data/*.raw")
+        >>> df = extract_eic_to_dataframe(files, mz=[500.0, 600.0])
+        >>> df.groupby('File')['mz_500.0000'].max()
+    """
+    # Extract EIC from all files
+    results = extract_eic_multiple_files(
+        file_paths,
+        mz,
+        tolerance,
+        start_scan,
+        end_scan,
+        max_workers,
+        return_dataframe=True,
+    )
+
+    # Combine into single DataFrame
+    dfs = []
+    for file_path, df in results.items():
+        if df is not None and len(df) > 0:
+            df_copy = df.copy()
+            df_copy.insert(0, "File", Path(file_path).name)
+            dfs.append(df_copy)
+
+    if not dfs:
+        return pd.DataFrame()
+
+    # Use pd.concat which is efficient for combining DataFrames
+    combined = pd.concat(dfs, ignore_index=True)
+    return combined
